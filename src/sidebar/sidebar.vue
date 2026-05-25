@@ -148,6 +148,7 @@ import * as Keybindings from 'src/services/keybindings.fg'
 import * as Utils from 'src/utils'
 import * as Popups from 'src/services/popups.fg'
 import * as Logs from 'src/services/logs'
+import { KEYBOARD_VIEWER_DEBUG_LOGGING } from 'src/services/keyboard-viewer-debug'
 import * as Preview from 'src/services/tabs.fg.preview'
 import ConfirmPopup from './components/popup.confirm.vue'
 import CtxMenuPopup from './components/popup.context-menu.vue'
@@ -346,15 +347,16 @@ let keyboardViewerPanelId: ID | null = null
 const keyboardViewerActive = ref(false)
 let keyboardViewerControllerOpen = false
 let keyboardViewerControllerWinId: ID | undefined
+let keyboardViewerControllerSessionId = ''
 let keyboardViewerToggleShortcuts: string[] = []
 const keyboardViewerCapturedTabIds = new Set<ID>()
 const KEYBOARD_VIEWER_PAGE_CAPTURE_TTL = 5 * 60 * 1000
 const KEYBOARD_VIEWER_PAGE_CAPTURE_TIMEOUT = 300
 const KEYBOARD_VIEWER_CONTROLLER_WIDTH = 80
 const KEYBOARD_VIEWER_CONTROLLER_HEIGHT = 40
-const KEYBOARD_VIEWER_CONTROLLER_OFFSCREEN_OFFSET = 10000
 const KEYBOARD_VIEWER_TOGGLE_COMMAND = '_execute_sidebar_action'
 const KEYBOARD_VIEWER_URL_WITHOUT_PROTOCOL_RE = /^(.+\.)\/?(.+\/)?\w+/
+const KEYBOARD_VIEWER_MARK_SHORTCUT_COUNT = 10
 
 interface KeyboardViewerControllerWindowBounds {
   width: number
@@ -364,6 +366,8 @@ interface KeyboardViewerControllerWindowBounds {
 }
 
 function logKeyboardViewer(message: string, data?: unknown): void {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
   Logs.info('Sidebar.keyboardViewer:', message, data)
   browser.runtime
     .sendMessage({
@@ -457,6 +461,13 @@ function startKeyboardViewer(): void {
   keyboardViewerActive.value = true
 }
 
+function ensureKeyboardViewerControllerSession(): string {
+  if (!keyboardViewerControllerSessionId) {
+    keyboardViewerControllerSessionId = `${Date.now()}:${Math.random().toString(36).slice(2)}`
+  }
+  return keyboardViewerControllerSessionId
+}
+
 async function initKeyboardViewer(): Promise<void> {
   logKeyboardViewer('init keyboard viewer start', {
     winId: Windows.id,
@@ -508,7 +519,11 @@ async function openKeyboardViewerController(): Promise<void> {
 }
 
 function getKeyboardViewerControllerUrl(): string {
-  return browser.runtime.getURL(`/popup.keyboard/keyboard.html?winId=${Windows.id}`)
+  const params = new URLSearchParams({
+    winId: Windows.id.toString(),
+    session: ensureKeyboardViewerControllerSession(),
+  })
+  return browser.runtime.getURL(`/popup.keyboard/keyboard.html?${params}`)
 }
 
 function resetKeyboardViewerBrowserActionPopup(): void {
@@ -522,16 +537,8 @@ function resetKeyboardViewerBrowserActionPopup(): void {
 function focusKeyboardViewerController(): void {
   if (!keyboardViewerControllerOpen) return
 
-  try {
-    browser.browserAction.setPopup({ popup: getKeyboardViewerControllerUrl() })
-    browser.browserAction.openPopup()
-    setTimeout(resetKeyboardViewerBrowserActionPopup, 500)
-    setTimeout(openKeyboardViewerControllerWindow, 350)
-  } catch (err) {
-    resetKeyboardViewerBrowserActionPopup()
-    Logs.err('Sidebar.keyboardViewer: Cannot open controller popup:', err)
-    openKeyboardViewerControllerWindow()
-  }
+  resetKeyboardViewerBrowserActionPopup()
+  openKeyboardViewerControllerWindow()
 }
 
 function refocusKeyboardViewerController(): void {
@@ -555,25 +562,32 @@ function closeKeyboardViewerController(notifyPopup = true): void {
 
   if (notifyPopup) {
     browser.runtime
-      .sendMessage({ type: 'sideberyKeyboardViewerClose', winId: Windows.id })
+      .sendMessage({
+        type: 'sideberyKeyboardViewerClose',
+        winId: Windows.id,
+        session: keyboardViewerControllerSessionId,
+      })
       .catch(() => {})
   }
 
   closeKeyboardViewerControllerWindow()
+  keyboardViewerControllerSessionId = ''
 }
 
 function openKeyboardViewerControllerWindow(): void {
   if (!keyboardViewerControllerOpen) return
 
+  const bounds = getKeyboardViewerControllerWindowBounds()
   if (keyboardViewerControllerWinId !== undefined) {
-    browser.windows.update(keyboardViewerControllerWinId, { focused: true }).catch(() => {
-      keyboardViewerControllerWinId = undefined
-      openKeyboardViewerControllerWindow()
-    })
+    browser.windows
+      .update(keyboardViewerControllerWinId, { ...bounds, focused: true })
+      .catch(() => {
+        keyboardViewerControllerWinId = undefined
+        openKeyboardViewerControllerWindow()
+      })
     return
   }
 
-  const bounds = getKeyboardViewerControllerWindowBounds()
   browser.windows
     .create({
       url: getKeyboardViewerControllerUrl(),
@@ -600,8 +614,8 @@ function getKeyboardViewerControllerWindowBounds(): KeyboardViewerControllerWind
   return {
     width: KEYBOARD_VIEWER_CONTROLLER_WIDTH,
     height: KEYBOARD_VIEWER_CONTROLLER_HEIGHT,
-    left: availLeft - KEYBOARD_VIEWER_CONTROLLER_OFFSCREEN_OFFSET,
-    top: availTop + screen.availHeight + KEYBOARD_VIEWER_CONTROLLER_OFFSCREEN_OFFSET,
+    left: availLeft,
+    top: Math.max(availTop, availTop + screen.availHeight - KEYBOARD_VIEWER_CONTROLLER_HEIGHT),
   }
 }
 
@@ -870,6 +884,53 @@ function isKeyboardViewerBlocked(): boolean {
   return !!(Menu.isOpen || Search.active || Windows.reactive.choosing || DnD.reactive.isStarted)
 }
 
+function getKeyboardViewerCodeShortcutKey(code: string): string | undefined {
+  if (code.startsWith('Digit')) return code.slice(5)
+  if (code.startsWith('Key')) return code.slice(3)
+  if (code === 'Comma' || code === 'Period' || code === 'Space') return code
+}
+
+function getKeyboardViewerMarkPinnedShortcuts(): string[] {
+  const shortcuts = Settings.state.kbMarkPinnedTabs.split(' ')
+
+  while (shortcuts.length < KEYBOARD_VIEWER_MARK_SHORTCUT_COUNT) shortcuts.push('')
+  return shortcuts.slice(0, KEYBOARD_VIEWER_MARK_SHORTCUT_COUNT)
+}
+
+function activateKeyboardViewerPinnedTabOfPanel(panelIndex: number): boolean {
+  const panel = Sidebar.panels.filter(Utils.isTabsPanel)[panelIndex]
+  if (!Utils.isTabsPanel(panel)) return false
+
+  const targetTabId =
+    panel.reactive.pinnedTabIds[0] ??
+    (Settings.state.pinnedTabsPosition === 'panel'
+      ? undefined
+      : Tabs.reactive.pinnedIds[panelIndex])
+  if (!targetTabId) return false
+
+  const targetTab = Tabs.byId[targetTabId]
+  if (!targetTab) return false
+
+  logKeyboardViewer('activate pinned tab from mark shortcut', {
+    panelId: panel.id,
+    panelIndex,
+    tab: getKeyboardViewerSideberyTabLogInfo(targetTab),
+  })
+  Sidebar.preserveKeyboardViewerSelection()
+  activateKeyboardViewerTab(targetTab).finally(refocusKeyboardViewerController)
+  return true
+}
+
+function handleKeyboardViewerMarkShortcut(code: string): boolean {
+  const key = getKeyboardViewerCodeShortcutKey(code)
+  if (!key) return false
+
+  const panelIndex = getKeyboardViewerMarkPinnedShortcuts().findIndex(shortcut => shortcut === key)
+  if (panelIndex === -1) return false
+
+  return activateKeyboardViewerPinnedTabOfPanel(panelIndex)
+}
+
 function selectActiveTabInActivePanel(): boolean {
   const activePanel = Sidebar.panelsById[Sidebar.activePanelId]
   const activeTab = Tabs.byId[Tabs.activeId]
@@ -900,6 +961,19 @@ function selectFirstVisibleTabInActivePanel(): void {
   Tabs.scrollToTab(tabId, true)
 }
 
+function selectFirstPinnedOrVisibleTabInActivePanel(): boolean {
+  const activePanel = Sidebar.panelsById[Sidebar.activePanelId]
+  if (!Utils.isTabsPanel(activePanel)) return false
+
+  const tabId = activePanel.reactive.pinnedTabIds[0] ?? activePanel.reactive.visibleTabIds[0]
+  if (!tabId) return false
+
+  Selection.resetSelection()
+  Selection.selectTab(tabId)
+  Tabs.scrollToTab(tabId, true)
+  return true
+}
+
 function moveKeyboardViewerTab(dir: 1 | -1): void {
   startKeyboardViewer()
   if (!Selection.isTabs()) selectActiveTabInActivePanel()
@@ -915,6 +989,16 @@ function selectKeyboardViewerPanel(): void {
 function moveKeyboardViewerPanel(dir: 1 | -1): void {
   startKeyboardViewer()
   Sidebar.selectPanel?.(dir)
+
+  const panelId = Selection.getFirst()
+  if (!Sidebar.panelsById[panelId]) return
+
+  logKeyboardViewer('move panel marker and preview panel', {
+    panelId,
+    activePanelId: Sidebar.activePanelId,
+  })
+  Sidebar.switchToPanel(panelId, true, true)
+  nextTick(() => Selection.selectNavItem(panelId))
 }
 
 function enterKeyboardViewerPanel(): void {
@@ -924,11 +1008,27 @@ function enterKeyboardViewerPanel(): void {
 
   const panelId = Selection.getFirst()
   if (!Sidebar.panelsById[panelId]) return
-  Sidebar.switchToPanel(panelId, true, true)
-
-  nextTick(() => {
-    if (!selectActiveTabInActivePanel()) selectFirstVisibleTabInActivePanel()
+  logKeyboardViewer('enter panel keeping panel marker', {
+    panelId,
+    activePanelId: Sidebar.activePanelId,
   })
+  Sidebar.switchToPanel(panelId, true, true)
+  nextTick(() => Selection.selectNavItem(panelId))
+}
+
+function enterKeyboardViewerTabsFromPanel(): void {
+  startKeyboardViewer()
+
+  if (!Selection.isNavItem()) return
+
+  const panelId = Selection.getFirst()
+  if (!Sidebar.panelsById[panelId]) return
+  logKeyboardViewer('enter panel tabs from panel marker', {
+    panelId,
+    activePanelId: Sidebar.activePanelId,
+  })
+  Sidebar.switchToPanel(panelId, true, true)
+  nextTick(() => selectFirstPinnedOrVisibleTabInActivePanel())
 }
 
 function cancelKeyboardViewer(notifyPopup = true): void {
@@ -1180,6 +1280,11 @@ function handleKeyboardViewerCode(
 
   if (isKeyboardViewerBlocked()) return false
 
+  if (handleKeyboardViewerMarkShortcut(code)) {
+    preventDefault?.()
+    return 'commit'
+  }
+
   if (code === 'ArrowUp') {
     preventDefault?.()
     if (Selection.isNavItem()) moveKeyboardViewerPanel(-1)
@@ -1202,7 +1307,7 @@ function handleKeyboardViewerCode(
 
   if (code === 'ArrowRight') {
     preventDefault?.()
-    enterKeyboardViewerPanel()
+    enterKeyboardViewerTabsFromPanel()
     return 'handled'
   }
 

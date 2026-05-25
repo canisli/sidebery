@@ -7367,6 +7367,18 @@ Przykłady: "*", "ctrl+$", "ctrl+alt+g"`,
     zh_TW: '- 依據垂直捲動切換設定來決定：\n  - 切換範圍（面板/全域）\n  - 切換時是否跳過/循環',
     ja: '- タブの切り替えに垂直スクロール設定を使用する',
   },
+  'settings.kb_mark_mode': {
+    en: 'Mark mode',
+  },
+  'settings.kb_mark_mode_note': {
+    en: 'Single-key shortcuts used only while the keyboard viewer is active.',
+  },
+  'settings.kb_mark_mode_input': {
+    en: 'Press key',
+  },
+  'settings.kb_mark_mode_pinned_tab': {
+    en: n => `First pinned tab of tabs panel ${n}`,
+  },
   'settings.kb_move_tabs': {
     en: 'Moving tabs',
     de: 'Tabs verschieben',

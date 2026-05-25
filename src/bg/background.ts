@@ -18,6 +18,7 @@ import * as WebReq from 'src/services/web-req.bg'
 import * as Sync from 'src/services/sync.bg'
 import * as Omnibox from 'src/services/omnibox.bg'
 import * as Styles from 'src/services/styles.bg'
+import { KEYBOARD_VIEWER_DEBUG_LOGGING } from 'src/services/keyboard-viewer-debug'
 
 void (async function main() {
   markLocalStorage()
@@ -145,11 +146,23 @@ void (async function main() {
 
 function initToolbarButton(): void {
   Menu.createBrowserActionMenu()
+  resetToolbarPopup()
 
   browser.browserAction.onClicked.addListener((_, info): void => {
     if (info && info.button === 1) browser.runtime.openOptionsPage()
-    else browser.sidebarAction.toggle()
+    else {
+      resetToolbarPopup()
+      browser.sidebarAction.toggle()
+    }
   })
+}
+
+function resetToolbarPopup(): void {
+  try {
+    browser.browserAction.setPopup({ popup: null })
+  } catch {
+    // The toolbar popup is only used temporarily by a few focused flows.
+  }
 }
 
 function markLocalStorage() {
@@ -168,6 +181,8 @@ let keyboardViewerLogSaveTimeout: number | undefined
 let keyboardViewerLogCopyTimeout: number | undefined
 
 function logKeyboardViewer(message: string, data?: unknown, winId?: ID): void {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
   Logs.info('Sidebar.keyboardViewer:', message, data)
   appendKeyboardViewerBufferedLog(`background: ${message}`, data)
   browser.runtime
@@ -181,6 +196,8 @@ function logKeyboardViewer(message: string, data?: unknown, winId?: ID): void {
 }
 
 function appendKeyboardViewerBufferedLog(message: string, data?: unknown): void {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
   const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false })
   const renderedData = data === undefined ? '' : ` ${formatKeyboardViewerLogData(data)}`
   keyboardViewerLogBuffer.push(`${timestamp} ${message}${renderedData}`)
@@ -253,7 +270,14 @@ async function writeKeyboardViewerLogToClipboard(text: string): Promise<void> {
 function setupKeyboardViewerMessageListener(): void {
   browser.runtime.onMessage.addListener(
     (
-      msg: { type?: string; code?: unknown; winId?: unknown; message?: unknown; data?: unknown },
+      msg: {
+        type?: string
+        code?: unknown
+        winId?: unknown
+        session?: unknown
+        message?: unknown
+        data?: unknown
+      },
       sender: { tab?: { windowId?: ID }; url?: string }
     ) => {
       if (!msg) return
@@ -266,6 +290,8 @@ function setupKeyboardViewerMessageListener(): void {
       }
 
       if (msg.type === 'sideberyKeyboardViewerLog') {
+        if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
         appendKeyboardViewerBufferedLog(
           typeof msg.message === 'string' ? msg.message : 'external log',
           {
@@ -288,9 +314,10 @@ function setupKeyboardViewerMessageListener(): void {
 
       if (msg.type === 'sideberyKeyboardViewerCloseRequest') {
         const requestedWinId = typeof msg.winId === 'number' ? msg.winId : undefined
+        const session = typeof msg.session === 'string' ? msg.session : undefined
         const winIds = getKeyboardViewerCommandWinIds(requestedWinId)
-        logKeyboardViewer('close request received', { msg, winIds }, requestedWinId)
-        return closeKeyboardViewerInWindows(winIds, true)
+        logKeyboardViewer('close request received', { msg, winIds, session }, requestedWinId)
+        return closeKeyboardViewerInWindows(winIds, true, session)
       }
 
       if (msg.type !== 'sideberyKeyboardViewerKey') return
@@ -331,7 +358,9 @@ async function migrateKeyboardViewerToggleShortcut(): Promise<void> {
       })
   }
 
-  await logKeyboardViewerCommandDiagnostics('startup after shortcut migration')
+  if (KEYBOARD_VIEWER_DEBUG_LOGGING) {
+    await logKeyboardViewerCommandDiagnostics('startup after shortcut migration')
+  }
 }
 
 async function logKeyboardViewerCommandDiagnostics(reason: string): Promise<void> {
@@ -359,9 +388,13 @@ async function logKeyboardViewerCommandDiagnostics(reason: string): Promise<void
   })
 }
 
-async function closeKeyboardViewerInWindows(winIds: ID[], forceClose: boolean): Promise<boolean> {
+async function closeKeyboardViewerInWindows(
+  winIds: ID[],
+  forceClose: boolean,
+  session?: string
+): Promise<boolean> {
   for (const winId of winIds) {
-    logKeyboardViewer('close in window attempt', { winId, forceClose }, winId)
+    logKeyboardViewer('close in window attempt', { winId, forceClose, session }, winId)
     if (forceClose) {
       const result = await IPC.sidebar(
         winId,
@@ -369,14 +402,17 @@ async function closeKeyboardViewerInWindows(winIds: ID[], forceClose: boolean): 
         'CloseFromKeyboardViewerController'
       ).catch(() => false)
       logKeyboardViewer('close in window forced controller close result', { winId, result }, winId)
-      await closeKeyboardViewerWindow(winId)
-      return true
+      if (result === 'cancel') {
+        await closeKeyboardViewerWindow(winId, session)
+        return true
+      }
+      continue
     }
 
     const result = await IPC.sidebar(winId, 'onKeyboardViewerKey', 'Escape').catch(() => false)
     logKeyboardViewer('close in window Escape result', { winId, result }, winId)
     if (result === 'cancel') {
-      await closeKeyboardViewerWindow(winId)
+      await closeKeyboardViewerWindow(winId, session)
       return true
     }
   }
@@ -384,8 +420,8 @@ async function closeKeyboardViewerInWindows(winIds: ID[], forceClose: boolean): 
   return false
 }
 
-async function closeKeyboardViewerWindow(winId: ID): Promise<void> {
-  logKeyboardViewer('closing controller and sidebar window', { winId }, winId)
+async function closeKeyboardViewerWindow(winId: ID, session?: string): Promise<void> {
+  logKeyboardViewer('closing controller and sidebar window', { winId, session }, winId)
 
   await browser.windows.update(winId, { focused: true }).catch(() => undefined)
 
@@ -402,7 +438,9 @@ async function closeKeyboardViewerWindow(winId: ID): Promise<void> {
   }
 
   await new Promise(resolve => setTimeout(resolve, 150))
-  browser.runtime.sendMessage({ type: 'sideberyKeyboardViewerClose', winId }).catch(() => {})
+  browser.runtime
+    .sendMessage({ type: 'sideberyKeyboardViewerClose', winId, session })
+    .catch(() => {})
 }
 
 function getKeyboardViewerCommandWinIds(preferredWinId?: ID): ID[] {

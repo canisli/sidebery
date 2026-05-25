@@ -1,6 +1,7 @@
 @import '../utils'
 
 #root
+  --keyboard-viewer-marker-color: #0a84ff
   --tabs-pinned-height: 30px
   --tabs-pinned-width: 30px
   --tabs-height: 30px
@@ -191,7 +192,7 @@
 #root[data-keyboard-viewer="true"] .Tab[data-selected="true"]:hover .body:before
 #root[data-keyboard-viewer="true"] .Tab[data-selected="true"]:active .body:before
   background-color: transparent
-  box-shadow: inset 0 0 0 3px #ff3030
+  box-shadow: inset 0 0 0 2px var(--keyboard-viewer-marker-color)
 .Tab[data-locked-selection="true"] .body:before
 .Tab[data-locked-selection="true"]:hover .body:before
 .Tab[data-locked-selection="true"]:active .body:before

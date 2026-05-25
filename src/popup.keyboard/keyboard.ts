@@ -1,3 +1,6 @@
+import { KEYBOARD_VIEWER_DEBUG_LOGGING } from 'src/services/keyboard-viewer-debug'
+import * as Settings from 'src/services/settings'
+
 type KeyboardViewerKeyResult = 'handled' | 'commit' | 'cancel' | false
 type ShortcutPart = 'ctrl' | 'alt' | 'shift' | 'meta'
 
@@ -21,12 +24,14 @@ const CAPTURED_KEYS = new Set([
 ])
 const params = new URLSearchParams(location.search)
 const targetWinId = Number(params.get('winId'))
+const controllerSessionId = params.get('session') ?? ''
 const keyCatcher = document.getElementById('key_catcher')
 const logEl = document.getElementById('keyboard_log')
 const copyLogBtn = document.getElementById('copy_log_btn') as HTMLButtonElement | null
 const KEYBOARD_VIEWER_TOGGLE_COMMAND = '_execute_sidebar_action'
 const KEYBOARD_VIEWER_STORAGE_LOG_KEY = 'keyboardViewerDebugLog'
 const KEYBOARD_VIEWER_STORAGE_LOG_UPDATED_KEY = 'keyboardViewerDebugLogUpdatedAt'
+const SIDEBAR_CLOSED_CONFIRMATION_POLLS = 4
 let toggleSidebarShortcuts: KeyboardViewerShortcut[] = []
 const intervals = { sidebarOpen: 0 }
 let closing = false
@@ -37,8 +42,29 @@ let copyLogStatusTimeout: number | undefined
 let autoCopyLogTimeout: number | undefined
 let persistLogTimeout: number | undefined
 let shortcutClosePending = false
+let sidebarClosedPolls = 0
+let settingsLoaded: Promise<void> = Promise.resolve()
+
+function getSingleShortcutKey(e: KeyboardEvent): string | undefined {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+
+  if (e.code.startsWith('Digit')) return e.code.slice(5)
+  if (e.code.startsWith('Key')) return e.code.slice(3)
+  if (e.key === ',') return 'Comma'
+  if (e.key === '.') return 'Period'
+  if (e.key === ' ') return 'Space'
+}
+
+function isMarkModeShortcut(e: KeyboardEvent): boolean {
+  const key = getSingleShortcutKey(e)
+  if (!key) return false
+
+  return Settings.state.kbMarkPinnedTabs.split(/\s+/).includes(key)
+}
 
 function logKeyboardViewer(message: string, data?: unknown): void {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
   const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false })
   const renderedData = data === undefined ? '' : ` ${formatLogData(data)}`
   const line = `${timestamp} ${message}${renderedData}`
@@ -60,6 +86,7 @@ function logKeyboardViewer(message: string, data?: unknown): void {
 }
 
 function importBufferedLogLines(lines: string[]): void {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
   if (!lines.length) return
 
   logLines = [...lines.slice(-60), ...logLines].slice(-80)
@@ -67,6 +94,8 @@ function importBufferedLogLines(lines: string[]): void {
 }
 
 async function loadBackgroundLogs(): Promise<void> {
+  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
+
   const response = (await browser.runtime
     .sendMessage({ type: 'sideberyKeyboardViewerGetLogs' })
     .catch(err => {
@@ -253,6 +282,7 @@ async function requestCloseKeyboardViewer(): Promise<void> {
       .sendMessage({
         type: 'sideberyKeyboardViewerSuppressNextToggle',
         winId: targetWinId,
+        session: controllerSessionId,
         reason: 'popup close request',
       })
       .catch(err => {
@@ -264,6 +294,7 @@ async function requestCloseKeyboardViewer(): Promise<void> {
       .sendMessage({
         type: 'sideberyKeyboardViewerCloseRequest',
         winId: targetWinId,
+        session: controllerSessionId,
       })
       .catch(err => {
         logKeyboardViewer('close request failed', err)
@@ -347,9 +378,13 @@ function closeKeyboardViewerFromShortcut(): void {
   logKeyboardViewer('shortcut close requested')
   shortcutClosePending = true
   closeSidebarFromUserAction()
-  requestCloseKeyboardViewer().catch(err => {
-    logKeyboardViewer('shortcut close request failed', err)
-  })
+  requestCloseKeyboardViewer()
+    .catch(err => {
+      logKeyboardViewer('shortcut close request failed', err)
+    })
+    .finally(() => {
+      waitForKeyboardViewerCloseLogs().then(closeController)
+    })
 }
 
 function waitForKeyboardViewerCloseLogs(): Promise<void> {
@@ -360,21 +395,34 @@ async function closeIfSidebarClosed(): Promise<void> {
   if (!Number.isFinite(targetWinId)) return
 
   const isOpen = await browser.sidebarAction.isOpen({ windowId: targetWinId }).catch(() => true)
+  if (isOpen) {
+    sidebarClosedPolls = 0
+    if (shortcutClosePending) logKeyboardViewer('shortcut close poll', { isOpen })
+    return
+  }
+
   if (shortcutClosePending) {
     logKeyboardViewer('shortcut close poll', { isOpen })
-    if (isOpen) return
     shortcutClosePending = false
+    sidebarClosedPolls = 0
   }
 
-  if (!isOpen) {
-    if (closeRequestPending) {
-      logKeyboardViewer('sidebar is closed; waiting for close request to finish')
-      return
-    }
-
-    logKeyboardViewer('sidebar is closed; closing controller')
-    closeController()
+  if (closeRequestPending) {
+    logKeyboardViewer('sidebar is closed; waiting for close request to finish')
+    return
   }
+
+  sidebarClosedPolls++
+  if (sidebarClosedPolls < SIDEBAR_CLOSED_CONFIRMATION_POLLS) {
+    logKeyboardViewer('sidebar closed poll not yet confirmed', {
+      polls: sidebarClosedPolls,
+      required: SIDEBAR_CLOSED_CONFIRMATION_POLLS,
+    })
+    return
+  }
+
+  logKeyboardViewer('sidebar is closed; closing controller')
+  closeController()
 }
 
 document.addEventListener(
@@ -404,7 +452,8 @@ document.addEventListener(
       logKeyboardViewer('ignored modified key', { code: e.code })
       return
     }
-    if (!CAPTURED_KEYS.has(e.code)) {
+    await settingsLoaded
+    if (!CAPTURED_KEYS.has(e.code) && !isMarkModeShortcut(e)) {
       logKeyboardViewer('ignored uncaptured key', { code: e.code })
       return
     }
@@ -428,12 +477,14 @@ browser.runtime.onMessage.addListener(
     type?: string
     source?: unknown
     winId?: unknown
+    session?: unknown
     message?: unknown
     data?: unknown
   }) => {
     if (!msg) return
     if (msg.source === 'keyboard-popup') return
     if (typeof msg.winId === 'number' && msg.winId !== targetWinId) return
+    if (typeof msg.session === 'string' && msg.session !== controllerSessionId) return
 
     if (msg.type === 'sideberyKeyboardViewerLog') {
       logKeyboardViewer(
@@ -473,10 +524,15 @@ const focusInterval = setInterval(() => {
   if (document.hasFocus() || focusAttempts >= 40) clearInterval(focusInterval)
 }, 25)
 focusController()
-loadBackgroundLogs().catch(err => {
-  logKeyboardViewer('background log buffer load failed', err)
+settingsLoaded = Settings.load().catch(err => {
+  logKeyboardViewer('settings load failed', err)
 })
-logKeyboardViewer('controller started', { targetWinId })
+if (KEYBOARD_VIEWER_DEBUG_LOGGING) {
+  loadBackgroundLogs().catch(err => {
+    logKeyboardViewer('background log buffer load failed', err)
+  })
+}
+logKeyboardViewer('controller started', { targetWinId, controllerSessionId })
 intervals.sidebarOpen = setInterval(() => {
   closeIfSidebarClosed()
 }, 250)

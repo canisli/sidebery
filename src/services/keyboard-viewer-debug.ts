@@ -1,0 +1,1 @@
+export const KEYBOARD_VIEWER_DEBUG_LOGGING = true

@@ -292,4 +292,5 @@ export interface SettingsState {
   selectCyclic: boolean
   loopPanelsIgnoreHidden: boolean
   kbNewTabInPanelPos: (typeof SETTINGS_OPTIONS.newTabInPanelPos)[number]
+  kbMarkPinnedTabs: string
 }

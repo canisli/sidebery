@@ -7,6 +7,8 @@
   --nav-delimiter-size: 16px
   --nav-btn-fg: var(--toolbar-fg)
   --nav-btn-accent: var(--accent)
+  --nav-btn-current-tab-panel-bg: #80808036
+  --nav-btn-current-tab-panel-shadow: inset 0 0 0 1px #80808073
   --nav-btn-len-margin: 0px
   --nav-btn-border-radius: var(--general-border-radius)
   --nav-hidden-btn-border-radius: var(--general-border-radius)
@@ -141,6 +143,10 @@
     background-color: var(--toolbar-el-overlay-hover-bg)
     box-shadow: var(--nav-btn-active-shadow)
 
+  &[data-current-tab-panel="true"]
+    background-color: var(--nav-btn-current-tab-panel-bg)
+    box-shadow: var(--nav-btn-current-tab-panel-shadow)
+
   &:not([data-class="space"]):active
     background-color: var(--toolbar-el-overlay-clicked-bg)
 
@@ -164,6 +170,26 @@
 
   &[data-unloaded="true"] > *
     opacity: .3
+
+#root[data-keyboard-viewer="true"] .NavigationBar .nav-item
+  &[data-active="true"]
+    background-color: transparent
+    box-shadow: none
+
+  &[data-current-tab-panel="true"]
+    background-color: var(--nav-btn-current-tab-panel-bg)
+    box-shadow: var(--nav-btn-current-tab-panel-shadow)
+
+  &[data-sel="true"]
+  &[data-sel="true"]:hover
+    opacity: 1
+    background-color: transparent
+    box-shadow: inset 0 0 0 2px var(--keyboard-viewer-marker-color)
+
+  &[data-current-tab-panel="true"][data-sel="true"]
+  &[data-current-tab-panel="true"][data-sel="true"]:hover
+    background-color: var(--nav-btn-current-tab-panel-bg)
+    box-shadow: inset 0 0 0 2px var(--keyboard-viewer-marker-color)
 
 // Remove border radius for the last item in vertical navbar.
 .NavigationBar&.-vert .main-items .nav-item:last-of-type

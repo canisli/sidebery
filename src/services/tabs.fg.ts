@@ -34,6 +34,7 @@ export * from 'src/services/tabs.fg.sorting'
 
 export interface TabsReactiveState {
   pinnedIds: ID[]
+  activePanelId: ID
   recentlyRemovedLen: number
   inlinePreview: boolean
   inlinePreviewImg: string
@@ -43,6 +44,7 @@ export interface TabsReactiveState {
 
 export let reactive: TabsReactiveState = {
   pinnedIds: [],
+  activePanelId: D.NOID,
   recentlyRemovedLen: 0,
   inlinePreview: false,
   inlinePreviewImg: '',
@@ -75,7 +77,10 @@ export const setDetachingTabIds = (ids: Set<ID>) => (detachingTabIds = ids)
 export let normTabsMoving = false
 
 export let activeId = D.NOID
-export const setActiveId = (id: ID) => (activeId = id)
+export const setActiveId = (id: ID) => {
+  activeId = id
+  reactive.activePanelId = byId[id]?.panelId ?? D.NOID
+}
 export const activeTabsGlobal: T.ActiveTabsHistory = { id: 'global', actTabOffset: -1, actTabs: [] }
 export let activeTabsPerPanel: Record<string, T.ActiveTabsHistory> = {}
 
@@ -414,7 +419,7 @@ async function restoreTabsState(src?: LoadSrc, ignoreLockedTabs?: boolean): Prom
     }
 
     // Set active tab id
-    activeId = activeTab.id
+    setActiveId(activeTab.id)
 
     // Update succession
     Tabs.updateSuccessionDebounced(0)

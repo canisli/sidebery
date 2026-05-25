@@ -173,6 +173,18 @@
     KeybindingField(:keybinding="Keybindings.reactive.byName.switch_to_last_tab")
 
   section
+    h2 {{translate('settings.kb_mark_mode')}}
+    span.header-shadow
+    .info {{translate('settings.kb_mark_mode_note')}}
+    MarkModeKeyField.-no-separator(
+      v-for="(_, i) in markPinnedShortcuts"
+      :key="i"
+      :label="translate('settings.kb_mark_mode_pinned_tab', i + 1)"
+      :value="markPinnedShortcuts[i]"
+      :duplicate="isDuplicateMarkShortcut(i)"
+      @update:value="updateMarkPinnedShortcut(i, $event)")
+
+  section
     h2 {{translate('settings.kb_move_tabs')}}
     span.header-shadow
     KeybindingField.-no-separator(:keybinding="Keybindings.reactive.byName.move_tab_to_active")
@@ -221,11 +233,36 @@ import * as Settings from 'src/services/settings.fg'
 import * as SetupPage from 'src/services/setup-page.fg'
 import * as Keybindings from 'src/services/keybindings.fg'
 import KeybindingField from 'src/page.setup/components/keybindings.keybinding.vue'
+import MarkModeKeyField from 'src/page.setup/components/keybindings.mark-mode-key.vue'
 import ToggleField from 'src/components/toggle-field.vue'
 import SelectField from 'src/components/select-field.vue'
 import InfoField from 'src/components/info-field.vue'
 
+const MARK_PINNED_SHORTCUTS_LEN = 10
 const el = ref<HTMLElement | null>(null)
+const markPinnedShortcuts = ref(parseMarkPinnedShortcuts())
+
+function parseMarkPinnedShortcuts(): string[] {
+  const shortcuts = Settings.state.kbMarkPinnedTabs.split(' ')
+
+  while (shortcuts.length < MARK_PINNED_SHORTCUTS_LEN) shortcuts.push('')
+  return shortcuts.slice(0, MARK_PINNED_SHORTCUTS_LEN)
+}
+
+function updateMarkPinnedShortcut(index: number, shortcut: string): void {
+  markPinnedShortcuts.value[index] = shortcut
+  Settings.state.kbMarkPinnedTabs = markPinnedShortcuts.value.join(' ')
+  Settings.saveDebounced(150)
+}
+
+function isDuplicateMarkShortcut(index: number): boolean {
+  const shortcut = markPinnedShortcuts.value[index]
+  if (!shortcut) return false
+
+  return markPinnedShortcuts.value.some((otherShortcut, otherIndex) => {
+    return otherIndex !== index && otherShortcut === shortcut
+  })
+}
 
 onMounted(() => SetupPage.registerEl('settings_keybindings', el.value))
 </script>

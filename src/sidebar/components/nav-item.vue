@@ -8,6 +8,7 @@
   :id="'nav' + item.id"
   :data-updated="isUpdated"
   :data-active="Sidebar.reactive.activePanelId === props.item.id"
+  :data-current-tab-panel="isCurrentTabPanel"
   :data-index="inlineIndex"
   :data-color="item.reactive.color"
   :data-sel="item.id === Sidebar.reactive.selectedNavId"
@@ -42,6 +43,7 @@
   data-class="panel"
   :id="'nav' + item.id"
   :data-active="Sidebar.reactive.activePanelId === props.item.id"
+  :data-current-tab-panel="isCurrentTabPanel"
   :data-index="inlineIndex"
   :data-color="item.reactive.color"
   :data-type="NavItemTypeNames[item.type] ?? item.type"
@@ -136,6 +138,10 @@ const isUpdated = computed<boolean>(() => {
     return Sidebar.reactive.activePanelId !== props.item.id && props.item.reactive.updated
   }
   return false
+})
+
+const isCurrentTabPanel = computed<boolean>(() => {
+  return Tabs.reactive.activePanelId === props.item.id
 })
 
 function dropPointerMode(id: ID): string {
