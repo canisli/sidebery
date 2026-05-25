@@ -93,6 +93,7 @@ export type SidebarActions = {
   getTabsTreeData: () => T.TabsTreeData
   getActivePanelConfig: () => T.PanelConfig | undefined
   switchToPanel: typeof SidebarFg.switchToPanel
+  onKeyboardViewerKey: typeof SidebarFg.onKeyboardViewerKey
   stopDrag: () => void
   setDragInfo: (dragInfo: T.DragInfo) => void
   getGroupInfo: (groupTabId: ID) => Promise<T.GroupInfo | null>

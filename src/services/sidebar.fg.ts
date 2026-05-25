@@ -130,6 +130,25 @@ export const setSelectPanelFn = (fn: (dir: 1 | -1) => void) => (selectPanel = fn
 export let scrollHiddenPanelsPopupTo: null | ((id: ID) => void) = null
 export const setScrollHiddenPanelsPopupToFn = (fn: (id: ID) => void) =>
   (scrollHiddenPanelsPopupTo = fn)
+export type KeyboardViewerKeyResult = 'handled' | 'commit' | 'cancel' | false
+export type KeyboardViewerKeyResponse = KeyboardViewerKeyResult | Promise<KeyboardViewerKeyResult>
+export let keyboardViewerKeyHandler: null | ((code: string) => KeyboardViewerKeyResponse) = null
+export const setKeyboardViewerKeyHandler = (
+  fn: null | ((code: string) => KeyboardViewerKeyResponse)
+) => (keyboardViewerKeyHandler = fn)
+let keyboardViewerPreserveSelectionUntil = 0
+
+export function onKeyboardViewerKey(code: string): KeyboardViewerKeyResponse {
+  return keyboardViewerKeyHandler?.(code) ?? false
+}
+
+export function preserveKeyboardViewerSelection(delay = 2000): void {
+  keyboardViewerPreserveSelectionUntil = Date.now() + delay
+}
+
+export function shouldPreserveKeyboardViewerSelection(): boolean {
+  return Date.now() < keyboardViewerPreserveSelectionUntil
+}
 
 interface PanelElements {
   scrollBox: HTMLElement
@@ -1343,7 +1362,8 @@ export function switchPanel(
   ignoreHidden?: boolean,
   withoutTabCreation?: boolean,
   restartDebouncer?: boolean,
-  shouldLoop?: boolean
+  shouldLoop?: boolean,
+  withoutTabActivation?: boolean
 ): void {
   // Single panel switch
   const delay = Settings.state.navSwitchPanelsDelay ?? 128
@@ -1438,7 +1458,7 @@ export function switchPanel(
     reactive.hiddenPanelsPopup = false
   }
 
-  switchToPanel(panel.id, false, withoutTabCreation)
+  switchToPanel(panel.id, withoutTabActivation, withoutTabCreation)
 
   if (nextActIsHidden && scrollHiddenPanelsPopupTo) {
     scrollHiddenPanelsPopupTo(panel.id)

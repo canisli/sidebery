@@ -1661,7 +1661,9 @@ function onTabActivated(info: browser.tabs.ActiveInfo): void {
   // Logs.info('Tabs.onTabActivated', info.tabId)
 
   // Reset selection
-  if (!DnD.reactive.isStarted) Selection.resetSelection()
+  if (!DnD.reactive.isStarted && !Sidebar.shouldPreserveKeyboardViewerSelection()) {
+    Selection.resetSelection()
+  }
 
   // Get new active tab
   const tab = Tabs.byId[info.tabId]

@@ -164,7 +164,7 @@ async function handleManifest(srcPath, dstPath) {
     // Reset commands
     for (const key of Object.keys(data.commands)) {
       const cmd = data.commands[key]
-      if (key === '_execute_sidebar_action') {
+      if (key === 'toggle_sidebery_sidebar') {
         cmd.suggested_key.windows = cmd.suggested_key.default
       } else {
         delete cmd.suggested_key

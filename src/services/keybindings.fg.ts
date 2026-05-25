@@ -705,6 +705,10 @@ function onKeySelect(dir: number): void {
   }
 }
 
+export function selectNext(dir: 1 | -1): void {
+  onKeySelect(dir)
+}
+
 /**
  * Expand selection to provided direction
  */

@@ -40,7 +40,8 @@
     "menus.overrideContext",
     "search",
     "theme",
-    "identity"
+    "identity",
+    "clipboardWrite"
   ],
   "optional_permissions": [
     "<all_urls>",
@@ -49,7 +50,6 @@
     "webRequestBlocking",
     "bookmarks",
     "tabHide",
-    "clipboardWrite",
     "clipboardRead",
     "history",
     "downloads"
@@ -68,9 +68,9 @@
   "commands": {
     "_execute_sidebar_action": {
       "suggested_key": {
-        "default": "Ctrl+E",
-        "mac": "MacCtrl+E",
-        "windows": "F1"
+        "default": "Alt+1",
+        "mac": "Alt+1",
+        "windows": "Alt+1"
       },
       "description": "__MSG_KbOpenSidebarPanel__"
     },
