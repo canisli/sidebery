@@ -21,6 +21,7 @@ const CAPTURED_KEYS = new Set([
   'ArrowRight',
   'Enter',
   'Escape',
+  'Backspace',
 ])
 const params = new URLSearchParams(location.search)
 const targetWinId = Number(params.get('winId'))
@@ -55,11 +56,20 @@ function getSingleShortcutKey(e: KeyboardEvent): string | undefined {
   if (e.key === ' ') return 'Space'
 }
 
+function getSearchText(e: KeyboardEvent): string | undefined {
+  if (e.altKey || e.ctrlKey || e.metaKey) return
+  if (e.key.length === 1) return e.key
+}
+
 function isMarkModeShortcut(e: KeyboardEvent): boolean {
   const key = getSingleShortcutKey(e)
   if (!key) return false
 
   return Settings.state.kbMarkPinnedTabs.split(/\s+/).includes(key)
+}
+
+function isSearchTextKey(e: KeyboardEvent): boolean {
+  return getSearchText(e) !== undefined
 }
 
 function logKeyboardViewer(message: string, data?: unknown): void {
@@ -250,7 +260,7 @@ function closeSidebarFromUserAction(): void {
   }
 }
 
-async function sendKey(code: string): Promise<KeyboardViewerKeyResult> {
+async function sendKey(code: string, text?: string): Promise<KeyboardViewerKeyResult> {
   if (!Number.isFinite(targetWinId)) {
     logKeyboardViewer('not sending key: missing target window id', { code, targetWinId })
     return false
@@ -261,6 +271,7 @@ async function sendKey(code: string): Promise<KeyboardViewerKeyResult> {
       type: 'sideberyKeyboardViewerKey',
       winId: targetWinId,
       code,
+      text,
     })
     .catch(err => {
       logKeyboardViewer('send key failed', { code, error: formatLogData(err) })
@@ -448,12 +459,12 @@ document.addEventListener(
       return
     }
 
-    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+    if ((e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) && !isSearchTextKey(e)) {
       logKeyboardViewer('ignored modified key', { code: e.code })
       return
     }
     await settingsLoaded
-    if (!CAPTURED_KEYS.has(e.code) && !isMarkModeShortcut(e)) {
+    if (!CAPTURED_KEYS.has(e.code) && !isMarkModeShortcut(e) && !isSearchTextKey(e)) {
       logKeyboardViewer('ignored uncaptured key', { code: e.code })
       return
     }
@@ -462,7 +473,7 @@ document.addEventListener(
     e.stopPropagation()
 
     if (e.code === 'Enter') pauseControllerFocus()
-    const result = await sendKey(e.code)
+    const result = await sendKey(e.code, getSearchText(e))
     logKeyboardViewer('sidebar key result', { code: e.code, result })
     resumeControllerFocus()
 

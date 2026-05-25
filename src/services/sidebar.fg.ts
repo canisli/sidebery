@@ -44,6 +44,9 @@ export interface SidebarReactiveState {
 
   subPanelActive: boolean
   subPanelType: E.SubPanelType
+
+  keyboardViewerSearchActive: boolean
+  keyboardViewerSearchQuery: string
 }
 
 export interface SubPanels {
@@ -70,6 +73,9 @@ export let reactive: SidebarReactiveState = {
 
   subPanelActive: false,
   subPanelType: E.SubPanelType.Null,
+
+  keyboardViewerSearchActive: false,
+  keyboardViewerSearchQuery: '',
 }
 
 export let activePanelId = D.NOID
@@ -132,14 +138,23 @@ export const setScrollHiddenPanelsPopupToFn = (fn: (id: ID) => void) =>
   (scrollHiddenPanelsPopupTo = fn)
 export type KeyboardViewerKeyResult = 'handled' | 'commit' | 'cancel' | false
 export type KeyboardViewerKeyResponse = KeyboardViewerKeyResult | Promise<KeyboardViewerKeyResult>
-export let keyboardViewerKeyHandler: null | ((code: string) => KeyboardViewerKeyResponse) = null
+export interface KeyboardViewerKeyPayload {
+  code: string
+  text?: string
+}
+export let keyboardViewerKeyHandler:
+  | null
+  | ((payload: KeyboardViewerKeyPayload) => KeyboardViewerKeyResponse) = null
 export const setKeyboardViewerKeyHandler = (
-  fn: null | ((code: string) => KeyboardViewerKeyResponse)
+  fn: null | ((payload: KeyboardViewerKeyPayload) => KeyboardViewerKeyResponse)
 ) => (keyboardViewerKeyHandler = fn)
 let keyboardViewerPreserveSelectionUntil = 0
 
-export function onKeyboardViewerKey(code: string): KeyboardViewerKeyResponse {
-  return keyboardViewerKeyHandler?.(code) ?? false
+export function onKeyboardViewerKey(
+  payload: string | KeyboardViewerKeyPayload
+): KeyboardViewerKeyResponse {
+  if (typeof payload === 'string') return keyboardViewerKeyHandler?.({ code: payload }) ?? false
+  return keyboardViewerKeyHandler?.(payload) ?? false
 }
 
 export function preserveKeyboardViewerSelection(delay = 2000): void {

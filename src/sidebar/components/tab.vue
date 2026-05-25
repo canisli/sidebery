@@ -65,7 +65,11 @@
         tabindex="-1"
         @blur="onCustomTitleBlur"
         @keydown="onCustomTitlteKD")
-      .title(ref="titleEl") {{tab.customTitle ?? tab.title}}
+      .title(ref="titleEl")
+        span(
+          v-for="(part, i) in titleParts"
+          :key="i"
+          :data-keyboard-viewer-search-match="part.match") {{part.text}}
     .close(
       v-if="!iconOnly && Settings.state.tabRmBtn !== 'none'"
       draggable="true"
@@ -107,6 +111,42 @@ const titleEl = ref<HTMLElement | null>(null)
 const favImgEl = ref<HTMLImageElement | null>(null)
 const favSvgUseEl = ref<SVGElement | null>(null)
 const flashFxEl = ref<HTMLElement | null>(null)
+
+interface TitlePart {
+  text: string
+  match: boolean
+}
+
+const title = computed<string>(() => tab.customTitle ?? tab.title)
+const titleParts = computed<TitlePart[]>(() => {
+  const query = Sidebar.reactive.keyboardViewerSearchQuery
+  if (!Sidebar.reactive.keyboardViewerSearchActive || !query) {
+    return [{ text: title.value, match: false }]
+  }
+
+  const parts: TitlePart[] = []
+  const lowerTitle = title.value.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  let nextSearchStart = 0
+  let matchStart = lowerTitle.indexOf(lowerQuery, nextSearchStart)
+
+  while (matchStart !== -1) {
+    if (matchStart > nextSearchStart) {
+      parts.push({ text: title.value.slice(nextSearchStart, matchStart), match: false })
+    }
+
+    const matchEnd = matchStart + query.length
+    parts.push({ text: title.value.slice(matchStart, matchEnd), match: true })
+    nextSearchStart = matchEnd
+    matchStart = lowerTitle.indexOf(lowerQuery, nextSearchStart)
+  }
+
+  if (nextSearchStart < title.value.length) {
+    parts.push({ text: title.value.slice(nextSearchStart), match: false })
+  }
+
+  return parts.length ? parts : [{ text: title.value, match: false }]
+})
 
 const tabColor = computed<string>(() => {
   if (tab.reactive.customColor) return RGB_COLORS[tab.customColor as browser.ColorName]

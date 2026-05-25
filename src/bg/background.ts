@@ -273,6 +273,7 @@ function setupKeyboardViewerMessageListener(): void {
       msg: {
         type?: string
         code?: unknown
+        text?: unknown
         winId?: unknown
         session?: unknown
         message?: unknown
@@ -330,13 +331,17 @@ function setupKeyboardViewerMessageListener(): void {
         'key message received',
         {
           code: msg.code,
+          text: msg.text,
           msgWinId: msg.winId,
           senderWinId: sender.tab?.windowId,
           targetWinId: winId,
         },
         winId
       )
-      return IPC.sidebar(winId, 'onKeyboardViewerKey', msg.code).catch(() => false)
+      return IPC.sidebar(winId, 'onKeyboardViewerKey', {
+        code: msg.code,
+        text: typeof msg.text === 'string' ? msg.text : undefined,
+      }).catch(() => false)
     }
   )
 }

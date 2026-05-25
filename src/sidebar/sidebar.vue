@@ -52,6 +52,10 @@
   CtxMenuPopup
   DragAndDropTooltip
   NotificationsPopup
+  .keyboard-viewer-search-box(
+    v-if="Sidebar.reactive.keyboardViewerSearchActive && Sidebar.reactive.keyboardViewerSearchQuery")
+    svg: use(href="#icon_search")
+    .query {{Sidebar.reactive.keyboardViewerSearchQuery}}
   .tab-preview(
     v-if="inlinePreview"
     v-show="Tabs.reactive.inlinePreview"
@@ -454,6 +458,7 @@ function getKeyboardViewerElementLogInfo(target: EventTarget | null): Record<str
 function resetKeyboardViewer(): void {
   keyboardViewerPanelId = null
   keyboardViewerActive.value = false
+  stopKeyboardViewerSearch()
 }
 
 function startKeyboardViewer(): void {
@@ -702,8 +707,11 @@ function getKeyboardViewerPageCaptureScript(active: boolean): string {
   state.handler = event => {
     if (Date.now() > state.activeUntil) return
     const isToggle = state.isToggleSidebarShortcut(event)
-    if (!isToggle && (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)) return
-    if (!isToggle && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape'].includes(event.code)) return
+    const text = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey
+      ? event.key
+      : undefined
+    if (!isToggle && (event.altKey || event.ctrlKey || event.metaKey || (event.shiftKey && !text))) return
+    if (!isToggle && !text && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace'].includes(event.code)) return
 
     event.preventDefault()
     event.stopPropagation()
@@ -713,6 +721,7 @@ function getKeyboardViewerPageCaptureScript(active: boolean): string {
       message: 'page capture: captured key',
       data: {
         code: event.code,
+        text,
         isToggle,
         activeTag: document.activeElement && document.activeElement.tagName,
         activeId: document.activeElement && document.activeElement.id,
@@ -727,7 +736,8 @@ function getKeyboardViewerPageCaptureScript(active: boolean): string {
     }
     browser.runtime.sendMessage({
       type: 'sideberyKeyboardViewerKey',
-      code: isToggle ? 'Escape' : event.code
+      code: isToggle ? 'Escape' : event.code,
+      text
     }).catch(() => {})
   }
   window.addEventListener('keydown', state.handler, true)
@@ -809,7 +819,7 @@ function isKeyboardViewerInputTarget(e: KeyboardEvent): boolean {
 }
 
 function hasKeyboardViewerMods(e: KeyboardEvent): boolean {
-  return e.altKey || e.ctrlKey || e.metaKey || e.shiftKey
+  return e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && !getKeyboardViewerEventText(e))
 }
 
 function parseKeyboardViewerShortcut(
@@ -890,6 +900,19 @@ function getKeyboardViewerCodeShortcutKey(code: string): string | undefined {
   if (code === 'Comma' || code === 'Period' || code === 'Space') return code
 }
 
+function getKeyboardViewerCodeText(code: string): string | undefined {
+  if (code.startsWith('Digit')) return code.slice(5)
+  if (code.startsWith('Key')) return code.slice(3).toLowerCase()
+  if (code === 'Comma') return ','
+  if (code === 'Period') return '.'
+  if (code === 'Space') return ' '
+}
+
+function getKeyboardViewerEventText(e: KeyboardEvent): string | undefined {
+  if (e.altKey || e.ctrlKey || e.metaKey) return
+  if (e.key.length === 1) return e.key
+}
+
 function getKeyboardViewerMarkPinnedShortcuts(): string[] {
   const shortcuts = Settings.state.kbMarkPinnedTabs.split(' ')
 
@@ -929,6 +952,151 @@ function handleKeyboardViewerMarkShortcut(code: string): boolean {
   if (panelIndex === -1) return false
 
   return activateKeyboardViewerPinnedTabOfPanel(panelIndex)
+}
+
+function getKeyboardViewerSearchPanel(): Panel | undefined {
+  const activePanel = Sidebar.panelsById[Sidebar.activePanelId]
+  if (Utils.isTabsPanel(activePanel)) return activePanel
+
+  return Sidebar.panels.find(Utils.isTabsPanel)
+}
+
+function getKeyboardViewerSearchPanelTabs(panel: Panel): Tab[] {
+  if (!Utils.isTabsPanel(panel)) return []
+  if (Settings.state.pinnedTabsPosition === 'panel') return [...panel.pinnedTabs, ...panel.tabs]
+  return [...Tabs.pinned, ...panel.tabs]
+}
+
+function keyboardViewerTabMatchesSearch(tab: Tab, query: string): boolean {
+  return (tab.customTitle ?? tab.title).toLowerCase().includes(query)
+}
+
+function getKeyboardViewerSearchMatchPanel(query: string): Panel | undefined {
+  const activePanel = getKeyboardViewerSearchPanel()
+  if (Utils.isTabsPanel(activePanel)) {
+    const hasActivePanelMatch = getKeyboardViewerSearchPanelTabs(activePanel).some(tab => {
+      return keyboardViewerTabMatchesSearch(tab, query)
+    })
+    if (hasActivePanelMatch) return activePanel
+  }
+
+  return Sidebar.panels.find(panel => {
+    if (!Utils.isTabsPanel(panel)) return false
+    return getKeyboardViewerSearchPanelTabs(panel).some(tab =>
+      keyboardViewerTabMatchesSearch(tab, query)
+    )
+  })
+}
+
+function setKeyboardViewerSearchQuery(query: string): void {
+  Sidebar.reactive.keyboardViewerSearchActive = true
+  Sidebar.reactive.keyboardViewerSearchQuery = query
+  applyKeyboardViewerSearch()
+}
+
+function getKeyboardViewerSearchText(
+  payload: Sidebar.KeyboardViewerKeyPayload
+): string | undefined {
+  return payload.text ?? getKeyboardViewerCodeText(payload.code)
+}
+
+function startKeyboardViewerSearch(text: string | undefined): boolean {
+  if (!text) return false
+  if (!text.trim()) return false
+
+  const panel = getKeyboardViewerSearchPanel()
+  if (!Utils.isTabsPanel(panel)) return false
+
+  startKeyboardViewer()
+  if (panel.id !== Sidebar.activePanelId) Sidebar.switchToPanel(panel.id, true, true)
+  setKeyboardViewerSearchQuery(text)
+  return true
+}
+
+function stopKeyboardViewerSearch(): void {
+  if (!Sidebar.reactive.keyboardViewerSearchActive && !Sidebar.reactive.keyboardViewerSearchQuery) {
+    return
+  }
+
+  Sidebar.reactive.keyboardViewerSearchActive = false
+  Sidebar.reactive.keyboardViewerSearchQuery = ''
+  Tabs.reactive.pinnedIds = Tabs.pinned.map(tab => tab.id)
+  for (const panel of Sidebar.panels) {
+    if (Utils.isTabsPanel(panel)) resetKeyboardViewerSearchPanel(panel)
+  }
+}
+
+function resetKeyboardViewerSearchPanel(panel: Panel): void {
+  if (!Utils.isTabsPanel(panel)) return
+
+  const wasFiltered = panel.filteredTabs !== undefined
+  panel.filteredTabs = undefined
+  panel.reactive.filteredLen = undefined
+  panel.reactive.pinnedTabIds =
+    Settings.state.pinnedTabsPosition === 'panel' ? panel.pinnedTabs.map(tab => tab.id) : []
+  if (wasFiltered) Sidebar.recalcVisibleTabs(panel.id)
+}
+
+function applyKeyboardViewerSearch(): void {
+  const query = Sidebar.reactive.keyboardViewerSearchQuery.toLowerCase()
+  const panel =
+    (query ? getKeyboardViewerSearchMatchPanel(query) : undefined) ?? getKeyboardViewerSearchPanel()
+  if (!Utils.isTabsPanel(panel)) return
+
+  if (!query) {
+    stopKeyboardViewerSearch()
+    return
+  }
+
+  if (panel.id !== Sidebar.activePanelId) Sidebar.switchToPanel(panel.id, true, true)
+  for (const otherPanel of Sidebar.panels) {
+    if (otherPanel.id !== panel.id && Utils.isTabsPanel(otherPanel)) {
+      resetKeyboardViewerSearchPanel(otherPanel)
+    }
+  }
+
+  const filteredPinnedTabs = getKeyboardViewerSearchPanelTabs(panel).filter(tab => {
+    return tab.pinned && keyboardViewerTabMatchesSearch(tab, query)
+  })
+  const filteredTabs = panel.tabs.filter(tab => keyboardViewerTabMatchesSearch(tab, query))
+
+  panel.filteredTabs = filteredTabs
+  panel.reactive.filteredLen = filteredPinnedTabs.length + filteredTabs.length
+  panel.reactive.pinnedTabIds =
+    Settings.state.pinnedTabsPosition === 'panel'
+      ? filteredPinnedTabs.map(tab => tab.id)
+      : panel.reactive.pinnedTabIds
+  panel.reactive.visibleTabIds = filteredTabs.map(tab => tab.id)
+  if (Settings.state.pinnedTabsPosition !== 'panel') {
+    Tabs.reactive.pinnedIds = filteredPinnedTabs.map(tab => tab.id)
+  }
+
+  Selection.resetSelection()
+  const firstTab = filteredPinnedTabs[0] ?? filteredTabs[0]
+  if (firstTab) {
+    Selection.selectTab(firstTab.id)
+    Tabs.scrollToTab(firstTab.id, true)
+  }
+}
+
+function handleKeyboardViewerSearchCode(payload: Sidebar.KeyboardViewerKeyPayload): boolean {
+  if (!Sidebar.reactive.keyboardViewerSearchActive) return false
+
+  if (payload.code === 'Escape') {
+    stopKeyboardViewerSearch()
+    return true
+  }
+
+  if (payload.code === 'Backspace') {
+    setKeyboardViewerSearchQuery(Sidebar.reactive.keyboardViewerSearchQuery.slice(0, -1))
+    return true
+  }
+
+  const text = getKeyboardViewerSearchText(payload)
+  if (!text) return false
+
+  setKeyboardViewerSearchQuery(Sidebar.reactive.keyboardViewerSearchQuery + text)
+  return true
 }
 
 function selectActiveTabInActivePanel(): boolean {
@@ -1221,7 +1389,7 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
       target: getKeyboardViewerElementLogInfo(e.target),
       keyboardViewerPanelId,
     })
-    return !!handleKeyboardViewerCode('Escape', () => {
+    return !!handleKeyboardViewerCode({ code: 'Escape' }, () => {
       e.preventDefault()
       e.stopPropagation()
       e.stopImmediatePropagation()
@@ -1248,7 +1416,7 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
     return false
   }
 
-  return !!handleKeyboardViewerCode(e.code, () => {
+  return !!handleKeyboardViewerCode({ code: e.code, text: getKeyboardViewerEventText(e) }, () => {
     e.preventDefault()
     e.stopPropagation()
     e.stopImmediatePropagation()
@@ -1256,9 +1424,16 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
 }
 
 function handleKeyboardViewerCode(
-  code: string,
+  payload: Sidebar.KeyboardViewerKeyPayload,
   preventDefault?: () => void
 ): Sidebar.KeyboardViewerKeyResponse {
+  const { code } = payload
+
+  if (handleKeyboardViewerSearchCode(payload)) {
+    preventDefault?.()
+    return 'handled'
+  }
+
   if (code === 'CloseFromKeyboardViewerController') {
     logKeyboardViewer('handling controller close code', {
       keyboardViewerPanelId,
@@ -1283,6 +1458,11 @@ function handleKeyboardViewerCode(
   if (handleKeyboardViewerMarkShortcut(code)) {
     preventDefault?.()
     return 'commit'
+  }
+
+  if (startKeyboardViewerSearch(getKeyboardViewerSearchText(payload))) {
+    preventDefault?.()
+    return 'handled'
   }
 
   if (code === 'ArrowUp') {
