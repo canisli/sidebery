@@ -64,7 +64,6 @@ async function main() {
           'popup.proxy/proxy': 'src/popup.proxy/proxy.ts',
           'popup.search/search': 'src/popup.search/search.ts',
           'popup.editing/editing': 'src/popup.editing/editing.ts',
-          'popup.keyboard/keyboard': 'src/popup.keyboard/keyboard.ts',
           '_locales/dict.common': 'src/_locales/dict.common.ts',
           '_locales/dict.sidebar': 'src/_locales/dict.sidebar.ts',
           '_locales/dict.setup-page': 'src/_locales/dict.setup-page.ts',

@@ -50,7 +50,6 @@ async function main(): Promise<void> {
     handleReopening: Tabs.handleReopening,
     getActivePanelConfig: Sidebar.getActivePanelConfig,
     switchToPanel: Sidebar.switchToPanel,
-    onKeyboardViewerKey: Sidebar.onKeyboardViewerKey,
     stopDrag: DnD.onExternalStop,
     setDragInfo: DnD.setDragInfo,
     getGroupInfo: Tabs.getGroupInfo,

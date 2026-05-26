@@ -1,5 +1,9 @@
 type ID = string | number
 
+interface Window {
+  sideberyFocusRoot?: (reason?: string) => void
+}
+
 type FirstParameter<T extends (...args: any) => any> = T extends (arg: infer P) => any ? P : never
 
 type DOMEvent<E extends Event, T = any> = E & {

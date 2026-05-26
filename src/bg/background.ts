@@ -18,7 +18,6 @@ import * as WebReq from 'src/services/web-req.bg'
 import * as Sync from 'src/services/sync.bg'
 import * as Omnibox from 'src/services/omnibox.bg'
 import * as Styles from 'src/services/styles.bg'
-import { KEYBOARD_VIEWER_DEBUG_LOGGING } from 'src/services/keyboard-viewer-debug'
 
 void (async function main() {
   markLocalStorage()
@@ -40,6 +39,7 @@ void (async function main() {
     getSidebarTabs: Tabs.getSidebarTabs,
     detachSidebarTabs: Tabs.detachSidebarTabs,
     openTabs: Tabs.openTabs,
+    activateKeyboardViewerTabFromSidebar,
     setActivePanelId: Sidebar.setActivePanelId,
     createSnapshot: Snapshots.createSnapshot,
     addSnapshot: Snapshots.addSnapshot,
@@ -74,8 +74,6 @@ void (async function main() {
   // Init first-need stuff
   IPC.setupGlobalMessageListener()
   IPC.setupConnectionListener()
-  setupKeyboardViewerMessageListener()
-  await migrateKeyboardViewerToggleShortcut()
   await Promise.all([Windows.load(), Containers.load(), Settings.load(), Info.loadVersionInfo()])
 
   Info.saveVersion()
@@ -169,288 +167,40 @@ function markLocalStorage() {
   localStorage.setItem('sdbr', '+')
 }
 
-const KEYBOARD_VIEWER_NATIVE_TOGGLE_COMMAND = '_execute_sidebar_action'
-const KEYBOARD_VIEWER_DEFAULT_TOGGLE_SHORTCUT = 'Alt+1'
-const KEYBOARD_VIEWER_OLD_DEFAULT_TOGGLE_SHORTCUTS = new Set(['Ctrl+E', 'MacCtrl+E', 'F1'])
-const KEYBOARD_VIEWER_DIAGNOSTIC_MARKER = 'native-only-2026-05-24-1908'
-const KEYBOARD_VIEWER_LOG_BUFFER_LIMIT = 200
-const KEYBOARD_VIEWER_STORAGE_LOG_KEY = 'keyboardViewerDebugLog'
-const KEYBOARD_VIEWER_STORAGE_LOG_UPDATED_KEY = 'keyboardViewerDebugLogUpdatedAt'
-const keyboardViewerLogBuffer: string[] = []
-let keyboardViewerLogSaveTimeout: number | undefined
-let keyboardViewerLogCopyTimeout: number | undefined
+async function activateKeyboardViewerTabFromSidebar(info: {
+  tabId: ID
+  loadUrl?: string
+  isBlankPlaceholder?: boolean
+  isNewTabPage?: boolean
+  shouldForceLoad?: boolean
+}): Promise<void> {
+  try {
+    const nativeTab = await browser.tabs.get(info.tabId)
 
-function logKeyboardViewer(message: string, data?: unknown, winId?: ID): void {
-  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
-
-  Logs.info('Sidebar.keyboardViewer:', message, data)
-  appendKeyboardViewerBufferedLog(`background: ${message}`, data)
-  browser.runtime
-    .sendMessage({
-      type: 'sideberyKeyboardViewerLog',
-      winId,
-      message: `background: ${message}`,
-      data,
+    await browser.windows.update(nativeTab.windowId, { focused: true }).catch(err => {
+      Logs.err('Sidebar.keyboardViewer: Cannot focus tab window:', err)
     })
-    .catch(() => {})
-}
 
-function appendKeyboardViewerBufferedLog(message: string, data?: unknown): void {
-  if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
-
-  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false })
-  const renderedData = data === undefined ? '' : ` ${formatKeyboardViewerLogData(data)}`
-  keyboardViewerLogBuffer.push(`${timestamp} ${message}${renderedData}`)
-  if (keyboardViewerLogBuffer.length > KEYBOARD_VIEWER_LOG_BUFFER_LIMIT) {
-    keyboardViewerLogBuffer.splice(
-      0,
-      keyboardViewerLogBuffer.length - KEYBOARD_VIEWER_LOG_BUFFER_LIMIT
-    )
-  }
-  scheduleKeyboardViewerLogPersistence()
-  scheduleKeyboardViewerLogClipboardCopy()
-}
-
-function formatKeyboardViewerLogData(data: unknown): string {
-  if (data instanceof Error) return `${data.name}: ${data.message}`
-  if (typeof data === 'string') return data
-
-  try {
-    return JSON.stringify(data)
-  } catch {
-    return String(data)
-  }
-}
-
-function scheduleKeyboardViewerLogPersistence(): void {
-  clearTimeout(keyboardViewerLogSaveTimeout)
-  keyboardViewerLogSaveTimeout = setTimeout(() => {
-    browser.storage.local
-      .set({
-        [KEYBOARD_VIEWER_STORAGE_LOG_KEY]: keyboardViewerLogBuffer.join('\n'),
-        [KEYBOARD_VIEWER_STORAGE_LOG_UPDATED_KEY]: Date.now(),
+    if (nativeTab.hidden) {
+      await browser.tabs.show(info.tabId).catch(err => {
+        Logs.err('Sidebar.keyboardViewer: Cannot show hidden tab:', err)
       })
-      .catch(() => {})
-  }, 100)
-}
-
-function scheduleKeyboardViewerLogClipboardCopy(): void {
-  clearTimeout(keyboardViewerLogCopyTimeout)
-  keyboardViewerLogCopyTimeout = setTimeout(() => {
-    writeKeyboardViewerLogToClipboard(keyboardViewerLogBuffer.join('\n')).catch(() => {})
-  }, 250)
-}
-
-async function writeKeyboardViewerLogToClipboard(text: string): Promise<void> {
-  if (!text) return
-
-  try {
-    await navigator.clipboard.writeText(text)
-    return
-  } catch {
-    // Fall through to execCommand for extension pages where navigator.clipboard is unavailable.
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  textarea.style.top = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-
-  try {
-    document.execCommand('copy')
-  } finally {
-    textarea.remove()
-  }
-}
-
-function setupKeyboardViewerMessageListener(): void {
-  browser.runtime.onMessage.addListener(
-    (
-      msg: {
-        type?: string
-        code?: unknown
-        text?: unknown
-        winId?: unknown
-        session?: unknown
-        message?: unknown
-        data?: unknown
-      },
-      sender: { tab?: { windowId?: ID }; url?: string }
-    ) => {
-      if (!msg) return
-
-      if (msg.type === 'sideberyKeyboardViewerGetLogs') {
-        return Promise.resolve({
-          marker: KEYBOARD_VIEWER_DIAGNOSTIC_MARKER,
-          lines: keyboardViewerLogBuffer,
-        })
-      }
-
-      if (msg.type === 'sideberyKeyboardViewerLog') {
-        if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
-
-        appendKeyboardViewerBufferedLog(
-          typeof msg.message === 'string' ? msg.message : 'external log',
-          {
-            data: msg.data,
-            msgWinId: msg.winId,
-            senderWinId: sender.tab?.windowId,
-            senderUrl: sender.url,
-          }
-        )
-        return
-      }
-
-      if (msg.type === 'sideberyKeyboardViewerSuppressNextToggle') {
-        const winIds = getKeyboardViewerCommandWinIds(
-          typeof msg.winId === 'number' ? msg.winId : sender.tab?.windowId
-        )
-        logKeyboardViewer('suppress next toggle requested', { msg, sender, winIds })
-        return
-      }
-
-      if (msg.type === 'sideberyKeyboardViewerCloseRequest') {
-        const requestedWinId = typeof msg.winId === 'number' ? msg.winId : undefined
-        const session = typeof msg.session === 'string' ? msg.session : undefined
-        const winIds = getKeyboardViewerCommandWinIds(requestedWinId)
-        logKeyboardViewer('close request received', { msg, winIds, session }, requestedWinId)
-        return closeKeyboardViewerInWindows(winIds, true, session)
-      }
-
-      if (msg.type !== 'sideberyKeyboardViewerKey') return
-      if (typeof msg.code !== 'string') return
-
-      const winId = typeof msg.winId === 'number' ? msg.winId : sender.tab?.windowId
-      if (winId === undefined) return
-
-      logKeyboardViewer(
-        'key message received',
-        {
-          code: msg.code,
-          text: msg.text,
-          msgWinId: msg.winId,
-          senderWinId: sender.tab?.windowId,
-          targetWinId: winId,
-        },
-        winId
-      )
-      return IPC.sidebar(winId, 'onKeyboardViewerKey', {
-        code: msg.code,
-        text: typeof msg.text === 'string' ? msg.text : undefined,
-      }).catch(() => false)
     }
-  )
-}
 
-async function migrateKeyboardViewerToggleShortcut(): Promise<void> {
-  const commands = await browser.commands.getAll().catch(() => [])
-  const nativeToggleCmd = commands.find(cmd => cmd.name === KEYBOARD_VIEWER_NATIVE_TOGGLE_COMMAND)
-  const nativeTargetShortcut =
-    !nativeToggleCmd?.shortcut ||
-    KEYBOARD_VIEWER_OLD_DEFAULT_TOGGLE_SHORTCUTS.has(nativeToggleCmd.shortcut)
-      ? KEYBOARD_VIEWER_DEFAULT_TOGGLE_SHORTCUT
-      : ''
+    const shouldLoadWithUrl = !!(info.loadUrl && info.isBlankPlaceholder)
+    if (shouldLoadWithUrl) {
+      await browser.tabs.update(info.tabId, { active: true, url: info.loadUrl })
+      return
+    }
 
-  if (nativeTargetShortcut && nativeToggleCmd?.shortcut !== nativeTargetShortcut) {
-    await browser.commands
-      .update({ name: KEYBOARD_VIEWER_NATIVE_TOGGLE_COMMAND, shortcut: nativeTargetShortcut })
-      .catch(err => {
-        Logs.err('Sidebar.keyboardViewer: Cannot migrate native sidebar shortcut:', err)
+    await browser.tabs.update(info.tabId, { active: true })
+
+    if (!info.isNewTabPage && (nativeTab.discarded || info.shouldForceLoad)) {
+      await browser.tabs.reload(info.tabId).catch(err => {
+        Logs.err('Sidebar.keyboardViewer: Cannot reload unloaded tab:', err)
       })
-  }
-
-  if (KEYBOARD_VIEWER_DEBUG_LOGGING) {
-    await logKeyboardViewerCommandDiagnostics('startup after shortcut migration')
-  }
-}
-
-async function logKeyboardViewerCommandDiagnostics(reason: string): Promise<void> {
-  const commands = await browser.commands.getAll().catch(err => {
-    logKeyboardViewer('command diagnostics getAll failed', {
-      reason,
-      error: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-    })
-    return []
-  })
-  const manifest = browser.runtime.getManifest()
-
-  logKeyboardViewer('command diagnostics', {
-    reason,
-    marker: KEYBOARD_VIEWER_DIAGNOSTIC_MARKER,
-    extensionUrl: browser.runtime.getURL(''),
-    version: manifest.version,
-    manifestCommands: manifest.commands,
-    runtimeCommands: commands.map(cmd => ({
-      name: cmd.name,
-      shortcut: cmd.shortcut,
-      description: cmd.description,
-    })),
-    winIds: getKeyboardViewerCommandWinIds(),
-  })
-}
-
-async function closeKeyboardViewerInWindows(
-  winIds: ID[],
-  forceClose: boolean,
-  session?: string
-): Promise<boolean> {
-  for (const winId of winIds) {
-    logKeyboardViewer('close in window attempt', { winId, forceClose, session }, winId)
-    if (forceClose) {
-      const result = await IPC.sidebar(
-        winId,
-        'onKeyboardViewerKey',
-        'CloseFromKeyboardViewerController'
-      ).catch(() => false)
-      logKeyboardViewer('close in window forced controller close result', { winId, result }, winId)
-      if (result === 'cancel') {
-        await closeKeyboardViewerWindow(winId, session)
-        return true
-      }
-      continue
     }
-
-    const result = await IPC.sidebar(winId, 'onKeyboardViewerKey', 'Escape').catch(() => false)
-    logKeyboardViewer('close in window Escape result', { winId, result }, winId)
-    if (result === 'cancel') {
-      await closeKeyboardViewerWindow(winId, session)
-      return true
-    }
-  }
-
-  return false
-}
-
-async function closeKeyboardViewerWindow(winId: ID, session?: string): Promise<void> {
-  logKeyboardViewer('closing controller and sidebar window', { winId, session }, winId)
-
-  await browser.windows.update(winId, { focused: true }).catch(() => undefined)
-
-  try {
-    browser.sidebarAction.close()
-    logKeyboardViewer('browser.sidebarAction.close called from background', { winId }, winId)
   } catch (err) {
-    logKeyboardViewer(
-      'browser.sidebarAction.close failed from background',
-      { winId, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) },
-      winId
-    )
-    Logs.err('Sidebar.keyboardViewer: Cannot close sidebar from background:', err)
+    Logs.err('Sidebar.keyboardViewer: Cannot activate committed tab:', err)
   }
-
-  await new Promise(resolve => setTimeout(resolve, 150))
-  browser.runtime
-    .sendMessage({ type: 'sideberyKeyboardViewerClose', winId, session })
-    .catch(() => {})
-}
-
-function getKeyboardViewerCommandWinIds(preferredWinId?: ID): ID[] {
-  const winIds = [preferredWinId, Windows.focusedId, Windows.lastFocusedId, ...Windows.byId.keys()]
-  return [...new Set(winIds)].filter((winId): winId is ID => {
-    return winId !== undefined && winId !== NOID
-  })
 }

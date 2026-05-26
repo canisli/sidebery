@@ -331,7 +331,6 @@ async function main() {
         'src/popup.proxy/proxy.ts',
         'src/popup.search/search.ts',
         'src/popup.editing/editing.ts',
-        'src/popup.keyboard/keyboard.ts',
         'src/_locales/dict.common.ts',
         'src/_locales/dict.sidebar.ts',
         'src/_locales/dict.setup-page.ts',

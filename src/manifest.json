@@ -67,11 +67,6 @@
   },
   "commands": {
     "_execute_sidebar_action": {
-      "suggested_key": {
-        "default": "Alt+1",
-        "mac": "Alt+1",
-        "windows": "Alt+1"
-      },
       "description": "__MSG_KbOpenSidebarPanel__"
     },
     "activate": {

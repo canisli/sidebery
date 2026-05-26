@@ -1,6 +1,7 @@
 <template lang="pug">
 #root.root.Sidebar(
   ref="rootEl"
+  tabindex="-1"
   :data-keyboard-viewer="keyboardViewerActive"
   :key="rrc"
   :data-native-scrollbar="Settings.state.nativeScrollbars"
@@ -133,7 +134,6 @@ import type { Component } from 'vue'
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, useTemplateRef } from 'vue'
 import type { Panel, Tab } from 'src/types'
 import * as E from 'src/enums'
-import { NOID } from 'src/defaults'
 import * as Settings from 'src/services/settings'
 import * as Sidebar from 'src/services/sidebar.fg'
 import * as Styles from 'src/services/styles.fg'
@@ -149,6 +149,7 @@ import * as Search from 'src/services/search.fg'
 import * as Sync from 'src/services/sync.fg'
 import * as Info from 'src/services/info'
 import * as Keybindings from 'src/services/keybindings.fg'
+import * as IPC from 'src/services/ipc'
 import * as Utils from 'src/utils'
 import * as Popups from 'src/services/popups.fg'
 import * as Logs from 'src/services/logs'
@@ -257,19 +258,18 @@ onMounted(() => {
   })
   updSidebarEls()
   document.addEventListener('keydown', onDocumentKeydown, true)
-  Sidebar.setKeyboardViewerKeyHandler(handleKeyboardViewerCode)
+  window.addEventListener('SidebarFocused', onSidebarFocused)
+  window.sideberyFocusRoot = (reason?: string) => focusSidebarRoot(reason ?? 'external request')
   initKeyboardViewer()
 })
 
 onBeforeUnmount(() => {
   logKeyboardViewer('sidebar before unmount', {
     winId: Windows.id,
-    keyboardViewerControllerOpen,
-    keyboardViewerControllerWinId,
   })
   document.removeEventListener('keydown', onDocumentKeydown, true)
-  Sidebar.setKeyboardViewerKeyHandler(null)
-  closeKeyboardViewerController()
+  window.removeEventListener('SidebarFocused', onSidebarFocused)
+  delete window.sideberyFocusRoot
 })
 
 function getPanelComponent(panel: Panel): Component | undefined {
@@ -296,6 +296,30 @@ function onFocusOut(e: FocusEvent): void {
     Selection.resetSelection()
     if (Sidebar.reactive.hiddenPanelsPopup) Sidebar.closeHiddenPanelsPopup(true)
   }
+}
+
+function onSidebarFocused(): void {
+  logKeyboardViewer('SidebarFocused event received', getKeyboardViewerFocusLogInfo())
+  focusSidebarRoot('SidebarFocused')
+}
+
+function focusSidebarRoot(reason: string): void {
+  nextTick(() => {
+    const el = rootEl.value
+    if (!el) {
+      logKeyboardViewer('sidebar root focus skipped: root missing', {
+        reason,
+        ...getKeyboardViewerFocusLogInfo(),
+      })
+      return
+    }
+
+    el.focus({ preventScroll: true })
+    logKeyboardViewer('sidebar root focus requested', {
+      reason,
+      ...getKeyboardViewerFocusLogInfo(),
+    })
+  })
 }
 
 function onDocumentKeydown(e: KeyboardEvent): void {
@@ -349,72 +373,28 @@ function onDocumentKeydown(e: KeyboardEvent): void {
 
 let keyboardViewerPanelId: ID | null = null
 const keyboardViewerActive = ref(false)
-let keyboardViewerControllerOpen = false
-let keyboardViewerControllerWinId: ID | undefined
-let keyboardViewerControllerSessionId = ''
 let keyboardViewerToggleShortcuts: string[] = []
-const keyboardViewerCapturedTabIds = new Set<ID>()
-const KEYBOARD_VIEWER_PAGE_CAPTURE_TTL = 5 * 60 * 1000
-const KEYBOARD_VIEWER_PAGE_CAPTURE_TIMEOUT = 300
-const KEYBOARD_VIEWER_CONTROLLER_WIDTH = 80
-const KEYBOARD_VIEWER_CONTROLLER_HEIGHT = 40
 const KEYBOARD_VIEWER_TOGGLE_COMMAND = '_execute_sidebar_action'
 const KEYBOARD_VIEWER_URL_WITHOUT_PROTOCOL_RE = /^(.+\.)\/?(.+\/)?\w+/
 const KEYBOARD_VIEWER_MARK_SHORTCUT_COUNT = 10
 
-interface KeyboardViewerControllerWindowBounds {
-  width: number
-  height: number
-  left: number
-  top: number
+type KeyboardViewerKeyResult = 'handled' | 'commit' | 'cancel' | false
+type KeyboardViewerKeyResponse = KeyboardViewerKeyResult | Promise<KeyboardViewerKeyResult>
+
+interface KeyboardViewerKeyPayload {
+  code: string
+  text?: string
 }
 
 function logKeyboardViewer(message: string, data?: unknown): void {
   if (!KEYBOARD_VIEWER_DEBUG_LOGGING) return
 
   Logs.info('Sidebar.keyboardViewer:', message, data)
-  browser.runtime
-    .sendMessage({
-      type: 'sideberyKeyboardViewerLog',
-      winId: Windows.id,
-      message,
-      data,
-    })
-    .catch(() => {})
-}
-
-function suppressNextKeyboardViewerToggle(reason: string): void {
-  logKeyboardViewer('requesting background toggle suppression', { reason })
-  browser.runtime
-    .sendMessage({
-      type: 'sideberyKeyboardViewerSuppressNextToggle',
-      winId: Windows.id,
-      reason,
-    })
-    .catch(() => {})
 }
 
 function formatKeyboardViewerError(err: unknown): string {
   if (err instanceof Error) return `${err.name}: ${err.message}`
   return String(err)
-}
-
-function getKeyboardViewerNativeTabLogInfo(
-  tab: browser.tabs.Tab | undefined
-): Record<string, unknown> {
-  if (!tab) return { available: false }
-
-  return {
-    available: true,
-    id: tab.id,
-    windowId: tab.windowId,
-    active: tab.active,
-    discarded: tab.discarded,
-    hidden: tab.hidden,
-    status: tab.status,
-    url: tab.url,
-    title: tab.title,
-  }
 }
 
 function getKeyboardViewerSideberyTabLogInfo(tab: Tab): Record<string, unknown> {
@@ -455,6 +435,15 @@ function getKeyboardViewerElementLogInfo(target: EventTarget | null): Record<str
   }
 }
 
+function getKeyboardViewerFocusLogInfo(): Record<string, unknown> {
+  return {
+    documentHasFocus: document.hasFocus(),
+    visibilityState: document.visibilityState,
+    activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
+    rootIsActive: document.activeElement === rootEl.value,
+  }
+}
+
 function resetKeyboardViewer(): void {
   keyboardViewerPanelId = null
   keyboardViewerActive.value = false
@@ -464,13 +453,6 @@ function resetKeyboardViewer(): void {
 function startKeyboardViewer(): void {
   if (keyboardViewerPanelId === null) keyboardViewerPanelId = Sidebar.activePanelId
   keyboardViewerActive.value = true
-}
-
-function ensureKeyboardViewerControllerSession(): string {
-  if (!keyboardViewerControllerSessionId) {
-    keyboardViewerControllerSessionId = `${Date.now()}:${Math.random().toString(36).slice(2)}`
-  }
-  return keyboardViewerControllerSessionId
 }
 
 async function initKeyboardViewer(): Promise<void> {
@@ -485,7 +467,6 @@ async function initKeyboardViewer(): Promise<void> {
   logKeyboardViewer('init keyboard viewer shortcuts loaded', {
     shortcuts: keyboardViewerToggleShortcuts,
   })
-  openKeyboardViewerController()
 
   await Tabs.waitForTabsReady()
   await nextTick()
@@ -494,9 +475,7 @@ async function initKeyboardViewer(): Promise<void> {
   logKeyboardViewer('init keyboard viewer selection ready', {
     selectedTabId: Selection.isTabs() ? Selection.getFirst() : undefined,
     activePanelId: Sidebar.activePanelId,
-    keyboardViewerControllerOpen,
   })
-  enableKeyboardViewerPageCapture()
 }
 
 async function loadKeyboardViewerToggleShortcut(): Promise<void> {
@@ -514,298 +493,6 @@ async function loadKeyboardViewerToggleShortcut(): Promise<void> {
     })),
     targetCommand: KEYBOARD_VIEWER_TOGGLE_COMMAND,
   })
-}
-
-async function openKeyboardViewerController(): Promise<void> {
-  keyboardViewerControllerOpen = true
-  if (await enableKeyboardViewerPageCapture()) return
-
-  focusKeyboardViewerController()
-}
-
-function getKeyboardViewerControllerUrl(): string {
-  const params = new URLSearchParams({
-    winId: Windows.id.toString(),
-    session: ensureKeyboardViewerControllerSession(),
-  })
-  return browser.runtime.getURL(`/popup.keyboard/keyboard.html?${params}`)
-}
-
-function resetKeyboardViewerBrowserActionPopup(): void {
-  try {
-    browser.browserAction.setPopup({ popup: null })
-  } catch {
-    // Browser action popup reset is best-effort cleanup.
-  }
-}
-
-function focusKeyboardViewerController(): void {
-  if (!keyboardViewerControllerOpen) return
-
-  resetKeyboardViewerBrowserActionPopup()
-  openKeyboardViewerControllerWindow()
-}
-
-function refocusKeyboardViewerController(): void {
-  enableKeyboardViewerPageCapture().then(captured => {
-    logKeyboardViewer('refocus controller page capture result', {
-      captured,
-      activeTabId: Tabs.activeId,
-    })
-    if (captured) return
-
-    focusKeyboardViewerController()
-    setTimeout(focusKeyboardViewerController, 50)
-    setTimeout(focusKeyboardViewerController, 150)
-  })
-}
-
-function closeKeyboardViewerController(notifyPopup = true): void {
-  keyboardViewerControllerOpen = false
-  disableKeyboardViewerPageCapture()
-  resetKeyboardViewerBrowserActionPopup()
-
-  if (notifyPopup) {
-    browser.runtime
-      .sendMessage({
-        type: 'sideberyKeyboardViewerClose',
-        winId: Windows.id,
-        session: keyboardViewerControllerSessionId,
-      })
-      .catch(() => {})
-  }
-
-  closeKeyboardViewerControllerWindow()
-  keyboardViewerControllerSessionId = ''
-}
-
-function openKeyboardViewerControllerWindow(): void {
-  if (!keyboardViewerControllerOpen) return
-
-  const bounds = getKeyboardViewerControllerWindowBounds()
-  if (keyboardViewerControllerWinId !== undefined) {
-    browser.windows
-      .update(keyboardViewerControllerWinId, { ...bounds, focused: true })
-      .catch(() => {
-        keyboardViewerControllerWinId = undefined
-        openKeyboardViewerControllerWindow()
-      })
-    return
-  }
-
-  browser.windows
-    .create({
-      url: getKeyboardViewerControllerUrl(),
-      type: 'popup',
-      ...bounds,
-      focused: true,
-      allowScriptsToClose: true,
-      titlePreface: '',
-    })
-    .then(win => {
-      keyboardViewerControllerWinId = win.id
-      if (win.id !== undefined) browser.windows.update(win.id, bounds).catch(() => {})
-    })
-    .catch(err => {
-      Logs.err('Sidebar.keyboardViewer: Cannot open controller window:', err)
-    })
-}
-
-function getKeyboardViewerControllerWindowBounds(): KeyboardViewerControllerWindowBounds {
-  const screenBounds = screen as Screen & { availLeft?: number; availTop?: number }
-  const availLeft = screenBounds.availLeft ?? 0
-  const availTop = screenBounds.availTop ?? 0
-
-  return {
-    width: KEYBOARD_VIEWER_CONTROLLER_WIDTH,
-    height: KEYBOARD_VIEWER_CONTROLLER_HEIGHT,
-    left: availLeft,
-    top: Math.max(availTop, availTop + screen.availHeight - KEYBOARD_VIEWER_CONTROLLER_HEIGHT),
-  }
-}
-
-function closeKeyboardViewerControllerWindow(): void {
-  const winId = keyboardViewerControllerWinId
-  keyboardViewerControllerWinId = undefined
-  if (winId === undefined) return
-
-  browser.windows.remove(winId).catch(() => {})
-}
-
-function getKeyboardViewerPageCaptureScript(active: boolean): string {
-  const activeUntil = active ? `Date.now() + ${KEYBOARD_VIEWER_PAGE_CAPTURE_TTL}` : '0'
-  const isActive = active ? 'true' : 'false'
-  const toggleShortcuts = JSON.stringify(keyboardViewerToggleShortcuts)
-
-  return `
-(() => {
-  const marker = '__sideberyKeyboardViewer'
-  const state = window[marker] || (window[marker] = {})
-  state.activeUntil = ${activeUntil}
-  state.toggleShortcuts = ${toggleShortcuts}
-  if (state.installed && state.handler) {
-    window.removeEventListener('keydown', state.handler, true)
-  }
-  state.installed = false
-  if (!${isActive}) return true
-
-  state.parseShortcut = shortcut => {
-    if (!shortcut) return null
-    const parts = shortcut.split('+')
-    const key = parts.pop()
-    if (!key) return null
-    const mods = new Set()
-    for (const part of parts) {
-      if (part === 'Alt') mods.add('alt')
-      else if (part === 'Shift') mods.add('shift')
-      else if (part === 'Ctrl' || part === 'MacCtrl') mods.add('ctrl')
-      else if (part === 'Command') mods.add('meta')
-    }
-    return { key: state.normalizeShortcutKey(key), mods }
-  }
-  state.normalizeShortcutKey = key => {
-    if (key.startsWith('Digit')) return key.slice(5)
-    if (key.startsWith('Numpad')) return key.slice(6)
-    if (key.startsWith('Arrow')) return key.slice(5)
-    return key
-  }
-  state.getEventShortcutKey = event => {
-    if (event.code.startsWith('Key')) return event.code.slice(3)
-    if (event.code.startsWith('Digit')) return event.code.slice(5)
-    if (event.code.startsWith('Numpad')) return event.code.slice(6)
-    if (event.code.startsWith('Arrow')) return event.code.slice(5)
-    if (event.code === 'Comma') return 'Comma'
-    if (event.code === 'Period') return 'Period'
-    if (event.code === 'Space') return 'Space'
-    if (event.code === 'Insert') return 'Insert'
-    if (event.code === 'Delete') return 'Delete'
-    if (event.code === 'Home') return 'Home'
-    if (event.code === 'End') return 'End'
-    if (event.code === 'PageUp') return 'PageUp'
-    if (event.code === 'PageDown') return 'PageDown'
-    if (/^F\\d\\d?$/.test(event.code)) return event.code
-  }
-  state.hasMod = (event, mod) => {
-    if (mod === 'ctrl') return event.ctrlKey
-    if (mod === 'alt') return event.altKey
-    if (mod === 'shift') return event.shiftKey
-    return event.metaKey
-  }
-  state.isToggleSidebarShortcut = event => {
-    const eventKey = state.getEventShortcutKey(event)
-    if (!eventKey) return false
-    return (state.toggleShortcuts || []).some(shortcutStr => {
-      const shortcut = state.parseShortcut(shortcutStr)
-      if (!shortcut) return false
-      if (eventKey !== shortcut.key) return false
-      return ['ctrl', 'alt', 'shift', 'meta'].every(mod => {
-        return state.hasMod(event, mod) === shortcut.mods.has(mod)
-      })
-    })
-  }
-  state.installed = true
-  state.handler = event => {
-    if (Date.now() > state.activeUntil) return
-    const isToggle = state.isToggleSidebarShortcut(event)
-    const text = event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey
-      ? event.key
-      : undefined
-    if (!isToggle && (event.altKey || event.ctrlKey || event.metaKey || (event.shiftKey && !text))) return
-    if (!isToggle && !text && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Backspace'].includes(event.code)) return
-
-    event.preventDefault()
-    event.stopPropagation()
-    event.stopImmediatePropagation()
-    browser.runtime.sendMessage({
-      type: 'sideberyKeyboardViewerLog',
-      message: 'page capture: captured key',
-      data: {
-        code: event.code,
-        text,
-        isToggle,
-        activeTag: document.activeElement && document.activeElement.tagName,
-        activeId: document.activeElement && document.activeElement.id,
-        activeEditable: document.activeElement && document.activeElement.isContentEditable
-      }
-    }).catch(() => {})
-    if (isToggle) {
-      browser.runtime.sendMessage({
-        type: 'sideberyKeyboardViewerSuppressNextToggle',
-        reason: 'page capture toggle'
-      }).catch(() => {})
-    }
-    browser.runtime.sendMessage({
-      type: 'sideberyKeyboardViewerKey',
-      code: isToggle ? 'Escape' : event.code,
-      text
-    }).catch(() => {})
-  }
-  window.addEventListener('keydown', state.handler, true)
-  return true
-})()
-`
-}
-
-async function enableKeyboardViewerPageCapture(tabId = Tabs.activeId): Promise<boolean> {
-  if (!keyboardViewerControllerOpen) {
-    logKeyboardViewer('page capture skipped: controller closed', { tabId })
-    return false
-  }
-  if (tabId === undefined || tabId === NOID) {
-    logKeyboardViewer('page capture skipped: invalid tab id', { tabId })
-    return false
-  }
-
-  logKeyboardViewer('page capture start', { tabId })
-  let settled = false
-  const capture = browser.tabs
-    .executeScript(tabId, {
-      code: getKeyboardViewerPageCaptureScript(true),
-      runAt: 'document_start',
-      allFrames: false,
-      matchAboutBlank: true,
-    })
-    .then(() => {
-      settled = true
-      keyboardViewerCapturedTabIds.add(tabId)
-      logKeyboardViewer('page capture installed', { tabId })
-      return true
-    })
-    .catch(err => {
-      settled = true
-      logKeyboardViewer('page capture failed', {
-        tabId,
-        error: formatKeyboardViewerError(err),
-      })
-      return false
-    })
-
-  const timeout = new Promise<boolean>(resolve => {
-    setTimeout(() => {
-      if (!settled) logKeyboardViewer('page capture timed out', { tabId })
-      resolve(false)
-    }, KEYBOARD_VIEWER_PAGE_CAPTURE_TIMEOUT)
-  })
-
-  return Promise.race([capture, timeout])
-}
-
-function disableKeyboardViewerPageCapture(): void {
-  const tabIds = [...keyboardViewerCapturedTabIds]
-  keyboardViewerCapturedTabIds.clear()
-
-  for (const tabId of tabIds) {
-    if (tabId === NOID) continue
-
-    browser.tabs
-      .executeScript(tabId, {
-        code: getKeyboardViewerPageCaptureScript(false),
-        runAt: 'document_start',
-        allFrames: false,
-        matchAboutBlank: true,
-      })
-      .catch(() => {})
-  }
 }
 
 function isKeyboardViewerInputTarget(e: KeyboardEvent): boolean {
@@ -934,14 +621,12 @@ function activateKeyboardViewerPinnedTabOfPanel(panelIndex: number): boolean {
   const targetTab = Tabs.byId[targetTabId]
   if (!targetTab) return false
 
-  logKeyboardViewer('activate pinned tab from mark shortcut', {
+  logKeyboardViewer('commit pinned tab from mark shortcut', {
     panelId: panel.id,
     panelIndex,
     tab: getKeyboardViewerSideberyTabLogInfo(targetTab),
   })
-  Sidebar.preserveKeyboardViewerSelection()
-  activateKeyboardViewerTab(targetTab).finally(refocusKeyboardViewerController)
-  return true
+  return commitKeyboardViewerTabFromUserInput(targetTab, 'mark shortcut')
 }
 
 function handleKeyboardViewerMarkShortcut(code: string): boolean {
@@ -994,9 +679,7 @@ function setKeyboardViewerSearchQuery(query: string): void {
   applyKeyboardViewerSearch()
 }
 
-function getKeyboardViewerSearchText(
-  payload: Sidebar.KeyboardViewerKeyPayload
-): string | undefined {
+function getKeyboardViewerSearchText(payload: KeyboardViewerKeyPayload): string | undefined {
   return payload.text ?? getKeyboardViewerCodeText(payload.code)
 }
 
@@ -1079,7 +762,7 @@ function applyKeyboardViewerSearch(): void {
   }
 }
 
-function handleKeyboardViewerSearchCode(payload: Sidebar.KeyboardViewerKeyPayload): boolean {
+function handleKeyboardViewerSearchCode(payload: KeyboardViewerKeyPayload): boolean {
   if (!Sidebar.reactive.keyboardViewerSearchActive) return false
 
   if (payload.code === 'Escape') {
@@ -1199,12 +882,11 @@ function enterKeyboardViewerTabsFromPanel(): void {
   nextTick(() => selectFirstPinnedOrVisibleTabInActivePanel())
 }
 
-function cancelKeyboardViewer(notifyPopup = true): void {
+function cancelKeyboardViewer(): void {
   const initialPanelId = keyboardViewerPanelId
   logKeyboardViewer('cancel keyboard viewer', {
     initialPanelId,
     activePanelId: Sidebar.activePanelId,
-    notifyPopup,
     activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
   })
   resetKeyboardViewer()
@@ -1213,10 +895,44 @@ function cancelKeyboardViewer(notifyPopup = true): void {
   if (initialPanelId && Sidebar.panelsById[initialPanelId]) {
     Sidebar.switchToPanel(initialPanelId, true, true)
   }
-  closeKeyboardViewerSidebar(notifyPopup)
+  closeKeyboardViewerSidebar()
 }
 
-async function commitKeyboardViewer(): Promise<boolean> {
+function commitKeyboardViewerTabFromUserInput(tab: Tab, reason: string): boolean {
+  const tabId = tab.id
+  const isBlankPlaceholder = isKeyboardViewerBlankUrlPlaceholder(tab, tab)
+  const isNewTabPage = isKeyboardViewerNewTabPage(tab, tab)
+  const shouldForceLoad = !!(tab.discarded || tab.reactive.discarded || isBlankPlaceholder)
+  const loadUrl =
+    isBlankPlaceholder || isNewTabPage ? getKeyboardViewerTabLoadUrl(tab, tab) : undefined
+
+  logKeyboardViewer('committing tab from user input', {
+    reason,
+    selectedTabId: tabId,
+    activeTabId: Tabs.activeId,
+    tab: getKeyboardViewerSideberyTabLogInfo(tab),
+    isBlankPlaceholder,
+    isNewTabPage,
+    shouldForceLoad,
+    loadUrl,
+  })
+
+  Sidebar.preserveKeyboardViewerSelection()
+  IPC.sendToBg('activateKeyboardViewerTabFromSidebar', {
+    tabId,
+    loadUrl,
+    isBlankPlaceholder,
+    isNewTabPage,
+    shouldForceLoad,
+  })
+
+  logKeyboardViewer('closing sidebar after committed tab', { tabId })
+  resetKeyboardViewer()
+  closeKeyboardViewerSidebar()
+  return true
+}
+
+function commitKeyboardViewerFromUserInput(): boolean {
   startKeyboardViewer()
   if (!Selection.isTabs()) selectActiveTabInActivePanel()
   if (!Selection.isTabs()) return false
@@ -1225,124 +941,21 @@ async function commitKeyboardViewer(): Promise<boolean> {
   const tab = Tabs.byId[tabId]
   if (!tab) return false
 
-  logKeyboardViewer('commit selected tab', {
-    selectedTabId: tabId,
-    activeTabId: Tabs.activeId,
-    tab: getKeyboardViewerSideberyTabLogInfo(tab),
-  })
-  Sidebar.preserveKeyboardViewerSelection()
-
-  try {
-    if (tabId === Tabs.activeId) {
-      await loadKeyboardViewerTab(tab)
-      return true
-    }
-
-    logKeyboardViewer('activating selected tab without pre-activation page capture', { tabId })
-    await activateKeyboardViewerTab(tab)
-    return true
-  } finally {
-    refocusKeyboardViewerController()
-  }
+  return commitKeyboardViewerTabFromUserInput(tab, 'selected tab')
 }
 
-function activateKeyboardViewerTab(tab: Tab): Promise<void> {
-  return activateAndLoadKeyboardViewerTab(tab).catch(err => {
-    logKeyboardViewer('activate tab failed', {
-      tab: getKeyboardViewerSideberyTabLogInfo(tab),
-      error: formatKeyboardViewerError(err),
-    })
-    Logs.err('Sidebar.keyboardViewer: Cannot activate tab:', err)
-  })
-}
-
-function loadKeyboardViewerTab(tab: Tab): Promise<void> {
-  return activateAndLoadKeyboardViewerTab(tab).catch(err => {
-    logKeyboardViewer('load unloaded tab failed', {
-      tab: getKeyboardViewerSideberyTabLogInfo(tab),
-      error: formatKeyboardViewerError(err),
-    })
-    Logs.err('Sidebar.keyboardViewer: Cannot load unloaded tab:', err)
-  })
-}
-
-async function activateAndLoadKeyboardViewerTab(tab: Tab): Promise<void> {
-  const nativeTab = await browser.tabs.get(tab.id).catch(err => {
-    logKeyboardViewer('browser.tabs.get failed before activation', {
-      tab: getKeyboardViewerSideberyTabLogInfo(tab),
-      error: formatKeyboardViewerError(err),
-    })
-    return undefined
-  })
-  const tabInfo = nativeTab ?? tab
-  const shouldForceLoad =
-    !!(tabInfo.discarded || tab.discarded || tab.reactive.discarded) ||
-    isKeyboardViewerBlankUrlPlaceholder(tabInfo, tab)
-  const loadUrl = shouldForceLoad ? getKeyboardViewerTabLoadUrl(tabInfo, tab) : undefined
-
-  logKeyboardViewer('activation decision', {
-    nativeTab: getKeyboardViewerNativeTabLogInfo(nativeTab),
-    sideberyTab: getKeyboardViewerSideberyTabLogInfo(tab),
-    shouldForceLoad,
-    loadUrl,
-  })
-
-  await browser.windows.update(tabInfo.windowId, { focused: true }).catch(err => {
-    logKeyboardViewer('browser.windows.update focus failed', {
-      windowId: tabInfo.windowId,
-      error: formatKeyboardViewerError(err),
-    })
-  })
-
-  if (tabInfo.hidden) {
-    await browser.tabs.show(tab.id).catch(err => {
-      logKeyboardViewer('browser.tabs.show failed', {
-        tabId: tab.id,
-        error: formatKeyboardViewerError(err),
-      })
-      Logs.err('Sidebar.keyboardViewer: Cannot show unloaded tab:', err)
-    })
-  }
-
-  if (shouldForceLoad && loadUrl) {
-    logKeyboardViewer('activating tab with url', { tabId: tab.id, loadUrl })
-    await browser.tabs.update(tab.id, { active: true, url: loadUrl })
-    await waitForKeyboardViewerTabLoadKickoff()
-  } else if (shouldForceLoad) {
-    logKeyboardViewer('activating tab then reloading', { tabId: tab.id })
-    await browser.tabs.update(tab.id, { active: true })
-    await browser.tabs.reload(tab.id).catch(err => {
-      logKeyboardViewer('browser.tabs.reload failed', {
-        tabId: tab.id,
-        error: formatKeyboardViewerError(err),
-      })
-      Logs.err('Sidebar.keyboardViewer: Cannot reload unloaded tab:', err)
-    })
-    await waitForKeyboardViewerTabLoadKickoff()
-  } else {
-    logKeyboardViewer('activating tab without forced load', { tabId: tab.id })
-    await browser.tabs.update(tab.id, { active: true })
-  }
-
-  const afterTab = await browser.tabs.get(tab.id).catch(err => {
-    logKeyboardViewer('browser.tabs.get failed after activation', {
-      tabId: tab.id,
-      error: formatKeyboardViewerError(err),
-    })
-    return undefined
-  })
-  logKeyboardViewer('activation finished', {
-    nativeTab: getKeyboardViewerNativeTabLogInfo(afterTab),
-  })
-}
-
-function isKeyboardViewerBlankUrlPlaceholder(tab: browser.tabs.Tab, fallbackTab: Tab): boolean {
+function isKeyboardViewerBlankUrlPlaceholder(tab: Tab, fallbackTab: Tab): boolean {
   const url = Utils.restoreUrl(tab.url) ?? Utils.restoreUrl(fallbackTab.url)
   const title = tab.title?.trim() || fallbackTab.title.trim()
   return url === 'about:blank' && KEYBOARD_VIEWER_URL_WITHOUT_PROTOCOL_RE.test(title)
 }
 
-function getKeyboardViewerTabLoadUrl(tab: browser.tabs.Tab, fallbackTab: Tab): string | undefined {
+function isKeyboardViewerNewTabPage(tab: Tab, fallbackTab: Tab): boolean {
+  const url = Utils.restoreUrl(tab.url) ?? Utils.restoreUrl(fallbackTab.url)
+  return url === 'about:newtab'
+}
+
+function getKeyboardViewerTabLoadUrl(tab: Tab, fallbackTab: Tab): string | undefined {
   const url = getKeyboardViewerLoadableUrl(tab.url) ?? getKeyboardViewerLoadableUrl(fallbackTab.url)
   const title = tab.title?.trim() || fallbackTab.title.trim()
 
@@ -1356,16 +969,12 @@ function getKeyboardViewerTabLoadUrl(tab: browser.tabs.Tab, fallbackTab: Tab): s
 
 function getKeyboardViewerLoadableUrl(url: string | undefined): string | undefined {
   const restoredUrl = Utils.restoreUrl(url)
-  if (!restoredUrl || restoredUrl === 'about:blank' || restoredUrl === 'about:newtab') return
+  if (!restoredUrl || restoredUrl === 'about:blank') return
   return restoredUrl
 }
 
-function waitForKeyboardViewerTabLoadKickoff(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, 1000))
-}
-
-function closeKeyboardViewerSidebar(notifyPopup = true): void {
-  logKeyboardViewer('closing keyboard viewer sidebar', { notifyPopup })
+function closeKeyboardViewerSidebar(): void {
+  logKeyboardViewer('closing keyboard viewer sidebar')
 
   try {
     browser.sidebarAction.close()
@@ -1376,13 +985,10 @@ function closeKeyboardViewerSidebar(notifyPopup = true): void {
     })
     Logs.err('Sidebar.keyboardViewer: Cannot close sidebar:', err)
   }
-
-  closeKeyboardViewerController(notifyPopup)
 }
 
 function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
   if (isKeyboardViewerToggleKeydown(e)) {
-    suppressNextKeyboardViewerToggle('sidebar document keydown toggle')
     logKeyboardViewer('handling toggle shortcut as close', {
       event: getKeyboardViewerEventLogInfo(e),
       activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
@@ -1424,23 +1030,14 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
 }
 
 function handleKeyboardViewerCode(
-  payload: Sidebar.KeyboardViewerKeyPayload,
+  payload: KeyboardViewerKeyPayload,
   preventDefault?: () => void
-): Sidebar.KeyboardViewerKeyResponse {
+): KeyboardViewerKeyResponse {
   const { code } = payload
 
   if (handleKeyboardViewerSearchCode(payload)) {
     preventDefault?.()
     return 'handled'
-  }
-
-  if (code === 'CloseFromKeyboardViewerController') {
-    logKeyboardViewer('handling controller close code', {
-      keyboardViewerPanelId,
-      activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
-    })
-    cancelKeyboardViewer(false)
-    return 'cancel'
   }
 
   if (code === 'Escape' && keyboardViewerPanelId !== null) {
@@ -1500,7 +1097,7 @@ function handleKeyboardViewerCode(
     }
     if (keyboardViewerPanelId === null && !Selection.isTabs()) return false
     preventDefault?.()
-    return commitKeyboardViewer().then(committed => (committed ? 'commit' : false))
+    return commitKeyboardViewerFromUserInput() ? 'commit' : false
   }
 
   return false

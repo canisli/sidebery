@@ -136,26 +136,7 @@ export const setSelectPanelFn = (fn: (dir: 1 | -1) => void) => (selectPanel = fn
 export let scrollHiddenPanelsPopupTo: null | ((id: ID) => void) = null
 export const setScrollHiddenPanelsPopupToFn = (fn: (id: ID) => void) =>
   (scrollHiddenPanelsPopupTo = fn)
-export type KeyboardViewerKeyResult = 'handled' | 'commit' | 'cancel' | false
-export type KeyboardViewerKeyResponse = KeyboardViewerKeyResult | Promise<KeyboardViewerKeyResult>
-export interface KeyboardViewerKeyPayload {
-  code: string
-  text?: string
-}
-export let keyboardViewerKeyHandler:
-  | null
-  | ((payload: KeyboardViewerKeyPayload) => KeyboardViewerKeyResponse) = null
-export const setKeyboardViewerKeyHandler = (
-  fn: null | ((payload: KeyboardViewerKeyPayload) => KeyboardViewerKeyResponse)
-) => (keyboardViewerKeyHandler = fn)
 let keyboardViewerPreserveSelectionUntil = 0
-
-export function onKeyboardViewerKey(
-  payload: string | KeyboardViewerKeyPayload
-): KeyboardViewerKeyResponse {
-  if (typeof payload === 'string') return keyboardViewerKeyHandler?.({ code: payload }) ?? false
-  return keyboardViewerKeyHandler?.(payload) ?? false
-}
 
 export function preserveKeyboardViewerSelection(delay = 2000): void {
   keyboardViewerPreserveSelectionUntil = Date.now() + delay

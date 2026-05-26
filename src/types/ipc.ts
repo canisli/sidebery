@@ -43,6 +43,13 @@ export type BgActions = {
   getSidebarTabs: typeof Tabs.getSidebarTabs
   detachSidebarTabs: typeof Tabs.detachSidebarTabs
   openTabs: typeof Tabs.openTabs
+  activateKeyboardViewerTabFromSidebar: (info: {
+    tabId: ID
+    loadUrl?: string
+    isBlankPlaceholder?: boolean
+    isNewTabPage?: boolean
+    shouldForceLoad?: boolean
+  }) => Promise<void>
   setActivePanelId: typeof SidebarBg.setActivePanelId
   createSnapshot: typeof Snapshots.createSnapshot
   addSnapshot: typeof Snapshots.addSnapshot
@@ -93,7 +100,6 @@ export type SidebarActions = {
   getTabsTreeData: () => T.TabsTreeData
   getActivePanelConfig: () => T.PanelConfig | undefined
   switchToPanel: typeof SidebarFg.switchToPanel
-  onKeyboardViewerKey: typeof SidebarFg.onKeyboardViewerKey
   stopDrag: () => void
   setDragInfo: (dragInfo: T.DragInfo) => void
   getGroupInfo: (groupTabId: ID) => Promise<T.GroupInfo | null>
