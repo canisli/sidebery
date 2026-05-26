@@ -53,10 +53,6 @@
   CtxMenuPopup
   DragAndDropTooltip
   NotificationsPopup
-  .keyboard-viewer-search-box(
-    v-if="Sidebar.reactive.keyboardViewerSearchActive && Sidebar.reactive.keyboardViewerSearchQuery")
-    svg: use(href="#icon_search")
-    .query {{Sidebar.reactive.keyboardViewerSearchQuery}}
   .tab-preview(
     v-if="inlinePreview"
     v-show="Tabs.reactive.inlinePreview"
@@ -81,6 +77,10 @@
     .central-box
       PinnedTabsBar(v-if="pinnedTabsBarTop")
       SearchBar(v-if="!navBarHorizontal" v-show="Settings.state.searchBarMode !== 'none'")
+      .keyboard-viewer-search-box(
+        v-if="Sidebar.reactive.keyboardViewerSearchActive && Sidebar.reactive.keyboardViewerSearchQuery")
+        svg: use(href="#icon_search")
+        .query {{Sidebar.reactive.keyboardViewerSearchQuery}}
       .panel-box(ref="panelBoxEl" @wheel.passive="onWheel")
         component.panel(
           v-for="(panel, i) in panels"
@@ -124,7 +124,7 @@
       NavigationBar.-vert(v-if="navBarRight")
 
   teleport(
-    v-if="Settings.state.selLen && Sidebar.reactive.selLenBadgeTarget && Sidebar.reactive.selLen"
+    v-if="showSelectionLengthBadge"
     :to="Sidebar.reactive.selLenBadgeTarget")
     .sel-len-teleported {{Sidebar.reactive.selLen}}
 </template>
@@ -231,6 +231,15 @@ const activePanel = computed<Panel | undefined>(() => {
   return Sidebar.panelsById[Sidebar.reactive.activePanelId]
 })
 
+const showSelectionLengthBadge = computed<boolean>(() => {
+  return !!(
+    Settings.state.selLen &&
+    !keyboardViewerActive.value &&
+    Sidebar.reactive.selLenBadgeTarget &&
+    Sidebar.reactive.selLen
+  )
+})
+
 const panels = computed<Panel[]>(() => {
   const output = []
   for (const id of Sidebar.reactive.nav) {
@@ -267,6 +276,7 @@ onBeforeUnmount(() => {
   logKeyboardViewer('sidebar before unmount', {
     winId: Windows.id,
   })
+  Sidebar.setKeyboardViewerActive(false)
   document.removeEventListener('keydown', onDocumentKeydown, true)
   window.removeEventListener('SidebarFocused', onSidebarFocused)
   delete window.sideberyFocusRoot
@@ -447,12 +457,14 @@ function getKeyboardViewerFocusLogInfo(): Record<string, unknown> {
 function resetKeyboardViewer(): void {
   keyboardViewerPanelId = null
   keyboardViewerActive.value = false
+  Sidebar.setKeyboardViewerActive(false)
   stopKeyboardViewerSearch()
 }
 
 function startKeyboardViewer(): void {
   if (keyboardViewerPanelId === null) keyboardViewerPanelId = Sidebar.activePanelId
   keyboardViewerActive.value = true
+  Sidebar.setKeyboardViewerActive(true)
 }
 
 async function initKeyboardViewer(): Promise<void> {

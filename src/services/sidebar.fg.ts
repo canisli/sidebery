@@ -137,6 +137,15 @@ export let scrollHiddenPanelsPopupTo: null | ((id: ID) => void) = null
 export const setScrollHiddenPanelsPopupToFn = (fn: (id: ID) => void) =>
   (scrollHiddenPanelsPopupTo = fn)
 let keyboardViewerPreserveSelectionUntil = 0
+let keyboardViewerActive = false
+
+export function setKeyboardViewerActive(active: boolean): void {
+  keyboardViewerActive = active
+}
+
+export function isKeyboardViewerActive(): boolean {
+  return keyboardViewerActive
+}
 
 export function preserveKeyboardViewerSelection(delay = 2000): void {
   keyboardViewerPreserveSelectionUntil = Date.now() + delay

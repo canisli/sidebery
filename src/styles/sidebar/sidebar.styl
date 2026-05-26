@@ -91,21 +91,22 @@ body
   background-color: var(--frame-bg)
 
 .keyboard-viewer-search-box
-  position: absolute
+  position: relative
   z-index: 500
-  top: var(--general-margin)
-  left: 50%
+  align-self: center
   display: flex
   max-width: calc(100% - var(--general-margin) * 2)
   height: 28px
+  flex-shrink: 0
   align-items: center
   gap: 6px
+  margin: var(--general-margin) var(--general-margin) 0
   padding: 0 10px
+  border: 1px solid var(--s-frame-fg-shadow)
   border-radius: var(--general-border-radius)
   color: var(--frame-fg)
   background-color: var(--frame-bg)
-  box-shadow: var(--frame-el-shadow), inset 0 0 0 1px var(--s-frame-fg-shadow)
-  transform: translateX(-50%)
+  box-shadow: var(--frame-el-shadow)
 
   svg
     width: 14px

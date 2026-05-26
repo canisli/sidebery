@@ -1108,6 +1108,50 @@ function rememberChildTabs(childId: ID, parentId: ID): void {
   }, 100)
 }
 
+let keyboardViewerMarkerActivationAfterSelectedTab:
+  | { removedTabId: ID; activeTabId: ID; expiresAt: number }
+  | undefined
+function rememberKeyboardViewerMarkerActivation(info: browser.tabs.ActiveInfo): void {
+  if (!Sidebar.isKeyboardViewerActive()) return
+  if (!Selection.isTabs()) return
+  if (Selection.getLength() !== 1) return
+  if (!Selection.includes(info.previousTabId)) return
+
+  keyboardViewerMarkerActivationAfterSelectedTab = {
+    removedTabId: info.previousTabId,
+    activeTabId: info.tabId,
+    expiresAt: Date.now() + 500,
+  }
+}
+
+function shouldMoveKeyboardViewerMarkerAfterRemoval(tabId: ID): boolean {
+  const activationAfterSelectedTab = keyboardViewerMarkerActivationAfterSelectedTab
+  const markerMovedByActivation =
+    activationAfterSelectedTab?.removedTabId === tabId &&
+    activationAfterSelectedTab.activeTabId === Tabs.activeId &&
+    activationAfterSelectedTab.expiresAt > Date.now()
+
+  return (
+    Sidebar.isKeyboardViewerActive() &&
+    ((Selection.isTabs() && Selection.getLength() === 1 && Selection.includes(tabId)) ||
+      markerMovedByActivation)
+  )
+}
+
+let moveKeyboardViewerMarkerToActiveTabPending = false
+function moveKeyboardViewerMarkerToActiveTab(): void {
+  if (!Sidebar.isKeyboardViewerActive()) return
+
+  const activeTab = Tabs.byId[Tabs.activeId]
+  if (!activeTab) return
+
+  moveKeyboardViewerMarkerToActiveTabPending = false
+  keyboardViewerMarkerActivationAfterSelectedTab = undefined
+  Selection.resetSelection()
+  Selection.selectTab(activeTab.id)
+  Tabs.scrollToTab(activeTab.id, true)
+}
+
 /**
  * Tabs.onRemoved
  */
@@ -1127,6 +1171,7 @@ function onTabRemoved(tabId: ID, info: browser.tabs.RemoveInfo, detached?: boole
   // Logs.info('Tabs.onTabRemoved', tabId)
 
   const removedExternally = !Tabs.removingTabs || !Tabs.removingTabs.length
+  const moveKeyboardViewerMarkerToNextTab = shouldMoveKeyboardViewerMarkerAfterRemoval(tabId)
   if (Tabs.removingTabs.length > 0) {
     Tabs.checkRemovedTabs()
 
@@ -1417,6 +1462,12 @@ function onTabRemoved(tabId: ID, info: browser.tabs.RemoveInfo, detached?: boole
   if (Preview.state.status === Preview.Status.Open && Preview.state.targetTabId === tabId) {
     Preview.resetTargetTab(tabId)
   }
+
+  if (moveKeyboardViewerMarkerToNextTab) {
+    moveKeyboardViewerMarkerToActiveTabPending = true
+    moveKeyboardViewerMarkerToActiveTab()
+    setTimeout(moveKeyboardViewerMarkerToActiveTab)
+  }
 }
 
 let _ignoreMoveEvents = false
@@ -1660,6 +1711,8 @@ function onTabActivated(info: browser.tabs.ActiveInfo): void {
 
   // Logs.info('Tabs.onTabActivated', info.tabId)
 
+  rememberKeyboardViewerMarkerActivation(info)
+
   // Reset selection
   if (!DnD.reactive.isStarted && !Sidebar.shouldPreserveKeyboardViewerSelection()) {
     Selection.resetSelection()
@@ -1787,4 +1840,6 @@ function onTabActivated(info: browser.tabs.ActiveInfo): void {
   if (Search.active && Settings.state.searchTabSwitch && !Search.reactive.barIsFocused) {
     Search.tmpKeepSearchingOnOutsideExit(500)
   }
+
+  if (moveKeyboardViewerMarkerToActiveTabPending) moveKeyboardViewerMarkerToActiveTab()
 }
