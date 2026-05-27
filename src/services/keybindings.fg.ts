@@ -709,6 +709,31 @@ export function selectNext(dir: 1 | -1): void {
   onKeySelect(dir)
 }
 
+export function removeSelectedTab(): boolean {
+  if (!Selection.isTabs()) return false
+
+  const tabId = Selection.getFirst()
+  const tab = Tabs.byId[tabId]
+  if (!tab) return true
+  if (tab.pinned) return true
+
+  onKeySelect(1)
+
+  const nextTabId = Selection.isTabs() ? Selection.getFirst() : NOID
+  Tabs.removeTabs([tabId]).then(async () => {
+    await Tabs.isRemovingFinished()
+
+    const nextTab = Tabs.byId[nextTabId]
+    if (nextTabId === NOID || nextTabId === tabId || !nextTab || nextTab.removing) return
+
+    Selection.resetSelection()
+    Selection.selectTab(nextTabId)
+    Tabs.scrollToTab(nextTabId, true)
+  })
+
+  return true
+}
+
 /**
  * Expand selection to provided direction
  */

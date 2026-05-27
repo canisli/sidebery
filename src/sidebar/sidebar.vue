@@ -392,6 +392,7 @@ type KeyboardViewerKeyResponse = KeyboardViewerKeyResult | Promise<KeyboardViewe
 
 interface KeyboardViewerKeyPayload {
   code: string
+  key?: string
   text?: string
 }
 
@@ -692,6 +693,10 @@ function getKeyboardViewerSearchText(payload: KeyboardViewerKeyPayload): string 
   return payload.text ?? getKeyboardViewerCodeText(payload.code)
 }
 
+function isKeyboardViewerBackspace(payload: KeyboardViewerKeyPayload): boolean {
+  return payload.code === 'Backspace' || payload.key === 'Backspace'
+}
+
 function startKeyboardViewerSearch(text: string | undefined): boolean {
   if (!text) return false
   if (!text.trim()) return false
@@ -779,7 +784,7 @@ function handleKeyboardViewerSearchCode(payload: KeyboardViewerKeyPayload): bool
     return true
   }
 
-  if (payload.code === 'Backspace') {
+  if (isKeyboardViewerBackspace(payload)) {
     setKeyboardViewerSearchQuery(Sidebar.reactive.keyboardViewerSearchQuery.slice(0, -1))
     return true
   }
@@ -953,6 +958,12 @@ function commitKeyboardViewerFromUserInput(): boolean {
   return commitKeyboardViewerTabFromUserInput(tab, 'selected tab')
 }
 
+function removeKeyboardViewerSelectedTab(): boolean {
+  startKeyboardViewer()
+  if (!Selection.isTabs()) selectActiveTabInActivePanel()
+  return Keybindings.removeSelectedTab()
+}
+
 function isKeyboardViewerBlankUrlPlaceholder(tab: Tab, fallbackTab: Tab): boolean {
   const url = Utils.restoreUrl(tab.url) ?? Utils.restoreUrl(fallbackTab.url)
   const title = tab.title?.trim() || fallbackTab.title.trim()
@@ -1004,7 +1015,7 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
       target: getKeyboardViewerElementLogInfo(e.target),
       keyboardViewerPanelId,
     })
-    return !!handleKeyboardViewerCode({ code: 'Escape' }, () => {
+    return !!handleKeyboardViewerCode({ code: 'Escape', key: 'Escape' }, () => {
       e.preventDefault()
       e.stopPropagation()
       e.stopImmediatePropagation()
@@ -1031,11 +1042,14 @@ function handleKeyboardViewerKeydown(e: KeyboardEvent): boolean {
     return false
   }
 
-  return !!handleKeyboardViewerCode({ code: e.code, text: getKeyboardViewerEventText(e) }, () => {
-    e.preventDefault()
-    e.stopPropagation()
-    e.stopImmediatePropagation()
-  })
+  return !!handleKeyboardViewerCode(
+    { code: e.code, key: e.key, text: getKeyboardViewerEventText(e) },
+    () => {
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+    }
+  )
 }
 
 function handleKeyboardViewerCode(
@@ -1045,6 +1059,11 @@ function handleKeyboardViewerCode(
   const { code } = payload
 
   if (handleKeyboardViewerSearchCode(payload)) {
+    preventDefault?.()
+    return 'handled'
+  }
+
+  if (isKeyboardViewerBackspace(payload) && removeKeyboardViewerSelectedTab()) {
     preventDefault?.()
     return 'handled'
   }
