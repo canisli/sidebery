@@ -276,7 +276,6 @@ onBeforeUnmount(() => {
   logKeyboardViewer('sidebar before unmount', {
     winId: Windows.id,
   })
-  Sidebar.setKeyboardViewerActive(false)
   document.removeEventListener('keydown', onDocumentKeydown, true)
   window.removeEventListener('SidebarFocused', onSidebarFocused)
   delete window.sideberyFocusRoot
@@ -457,14 +456,12 @@ function getKeyboardViewerFocusLogInfo(): Record<string, unknown> {
 function resetKeyboardViewer(): void {
   keyboardViewerPanelId = null
   keyboardViewerActive.value = false
-  Sidebar.setKeyboardViewerActive(false)
   stopKeyboardViewerSearch()
 }
 
 function startKeyboardViewer(): void {
   if (keyboardViewerPanelId === null) keyboardViewerPanelId = Sidebar.activePanelId
   keyboardViewerActive.value = true
-  Sidebar.setKeyboardViewerActive(true)
 }
 
 async function initKeyboardViewer(): Promise<void> {
