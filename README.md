@@ -1,3 +1,6 @@
+Usage: Use `npm run build.ext -- --overwrite-dest` to compile addon into dist/sidebery-5.2.2.zip and go to about:debugging and load a temporary addon and select that zip
+
+
 <div align="center">
 
 <img src="docs/assets/readme-logo.svg" height="96" alt="Sidebery">
