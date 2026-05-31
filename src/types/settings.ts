@@ -293,4 +293,5 @@ export interface SettingsState {
   loopPanelsIgnoreHidden: boolean
   kbNewTabInPanelPos: (typeof SETTINGS_OPTIONS.newTabInPanelPos)[number]
   kbMarkPinnedTabs: string
+  kbKeyboardViewerShortcuts: string
 }

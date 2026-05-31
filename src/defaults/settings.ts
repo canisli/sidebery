@@ -1,4 +1,5 @@
 import { SettingsState } from '../types/settings'
+import { DEFAULT_KEYBOARD_VIEWER_SHORTCUTS_CONF } from '../services/keyboard-viewer-shortcuts'
 
 export const DEFAULT_SETTINGS: SettingsState = {
   // General
@@ -294,6 +295,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   loopPanelsIgnoreHidden: false,
   kbNewTabInPanelPos: 'general',
   kbMarkPinnedTabs: '1 2 3 4 5 6 7 8 9 0',
+  kbKeyboardViewerShortcuts: DEFAULT_KEYBOARD_VIEWER_SHORTCUTS_CONF,
 }
 
 // prettier-ignore

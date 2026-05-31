@@ -474,7 +474,15 @@ export async function getDbgDetails(): Promise<T.DbgInfo> {
 }
 
 export function copyDevtoolsUrl(): void {
-  const url = 'about:devtools-toolbox?id=%7B3c078156-979c-498b-8990-85f7987dd929%7D&type=extension'
+  const manifest = browser.runtime.getManifest() as browser.Manifest & {
+    browser_specific_settings: {
+      gecko: {
+        id: string
+      }
+    }
+  }
+  const addonId = manifest.browser_specific_settings.gecko.id
+  const url = `about:devtools-toolbox?id=${encodeURIComponent(addonId)}&type=extension`
   navigator.clipboard.writeText(url)
 }
 

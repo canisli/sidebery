@@ -1,6 +1,19 @@
 <template lang="pug">
 .Settings
   section(ref="el")
+    h2 {{translate('settings.kb_keyboard_viewer')}}
+    span.header-shadow
+    .info {{translate('settings.kb_keyboard_viewer_note')}}
+    KeyboardViewerKeyField.-no-separator(
+      v-for="action of KEYBOARD_VIEWER_SHORTCUT_ACTIONS"
+      :key="action"
+      :label="translate(`settings.kb_keyboard_viewer_${action}`)"
+      :value="keyboardViewerShortcuts[action]"
+      :duplicates="getDuplicateKeyboardViewerShortcuts(action)"
+      @add:value="addKeyboardViewerShortcut(action, $event)"
+      @remove:value="removeKeyboardViewerShortcut(action, $event)")
+
+  section
     h2 {{translate('settings.kb_general')}}
     span.header-shadow
     KeybindingField.-no-separator(:keybinding="Keybindings.reactive.byName._execute_sidebar_action")
@@ -232,8 +245,15 @@ import { translate } from 'src/dict'
 import * as Settings from 'src/services/settings.fg'
 import * as SetupPage from 'src/services/setup-page.fg'
 import * as Keybindings from 'src/services/keybindings.fg'
+import {
+  KEYBOARD_VIEWER_SHORTCUT_ACTIONS,
+  parseKeyboardViewerShortcuts,
+  stringifyKeyboardViewerShortcuts,
+  type KeyboardViewerShortcutAction,
+} from 'src/services/keyboard-viewer-shortcuts'
 import KeybindingField from 'src/page.setup/components/keybindings.keybinding.vue'
 import MarkModeKeyField from 'src/page.setup/components/keybindings.mark-mode-key.vue'
+import KeyboardViewerKeyField from 'src/page.setup/components/keybindings.keyboard-viewer-key.vue'
 import ToggleField from 'src/components/toggle-field.vue'
 import SelectField from 'src/components/select-field.vue'
 import InfoField from 'src/components/info-field.vue'
@@ -241,6 +261,9 @@ import InfoField from 'src/components/info-field.vue'
 const MARK_PINNED_SHORTCUTS_LEN = 10
 const el = ref<HTMLElement | null>(null)
 const markPinnedShortcuts = ref(parseMarkPinnedShortcuts())
+const keyboardViewerShortcuts = ref(
+  parseKeyboardViewerShortcuts(Settings.state.kbKeyboardViewerShortcuts)
+)
 
 function parseMarkPinnedShortcuts(): string[] {
   const shortcuts = Settings.state.kbMarkPinnedTabs.split(' ')
@@ -255,13 +278,70 @@ function updateMarkPinnedShortcut(index: number, shortcut: string): void {
   Settings.saveDebounced(150)
 }
 
+function addKeyboardViewerShortcut(action: KeyboardViewerShortcutAction, shortcut: string): void {
+  if (keyboardViewerShortcuts.value[action].includes(shortcut)) return
+
+  keyboardViewerShortcuts.value[action].push(shortcut)
+  saveKeyboardViewerShortcuts()
+}
+
+function removeKeyboardViewerShortcut(
+  action: KeyboardViewerShortcutAction,
+  shortcut: string
+): void {
+  keyboardViewerShortcuts.value[action] = keyboardViewerShortcuts.value[action].filter(s => {
+    return s !== shortcut
+  })
+  saveKeyboardViewerShortcuts()
+}
+
+function saveKeyboardViewerShortcuts(): void {
+  Settings.state.kbKeyboardViewerShortcuts = stringifyKeyboardViewerShortcuts(
+    keyboardViewerShortcuts.value
+  )
+  Settings.saveDebounced(150)
+}
+
 function isDuplicateMarkShortcut(index: number): boolean {
   const shortcut = markPinnedShortcuts.value[index]
   if (!shortcut) return false
 
-  return markPinnedShortcuts.value.some((otherShortcut, otherIndex) => {
-    return otherIndex !== index && otherShortcut === shortcut
+  return (
+    markPinnedShortcuts.value.some((otherShortcut, otherIndex) => {
+      return otherIndex !== index && otherShortcut === shortcut
+    }) || isKeyboardViewerShortcutUsed(markShortcutToKeyboardViewerCode(shortcut))
+  )
+}
+
+function getDuplicateKeyboardViewerShortcuts(action: KeyboardViewerShortcutAction): string[] {
+  return keyboardViewerShortcuts.value[action].filter(shortcut => {
+    return isKeyboardViewerShortcutUsed(shortcut, action) || isMarkShortcutUsed(shortcut)
   })
+}
+
+function isKeyboardViewerShortcutUsed(
+  shortcut: string | undefined,
+  exceptAction?: KeyboardViewerShortcutAction
+): boolean {
+  if (!shortcut) return false
+
+  return KEYBOARD_VIEWER_SHORTCUT_ACTIONS.some(action => {
+    if (action === exceptAction) return false
+    return keyboardViewerShortcuts.value[action].includes(shortcut)
+  })
+}
+
+function isMarkShortcutUsed(shortcut: string): boolean {
+  return markPinnedShortcuts.value.some(markShortcut => {
+    return markShortcutToKeyboardViewerCode(markShortcut) === shortcut
+  })
+}
+
+function markShortcutToKeyboardViewerCode(shortcut: string): string | undefined {
+  if (!shortcut) return
+  if (/^\d$/.test(shortcut)) return `Digit${shortcut}`
+  if (/^[A-Z]$/.test(shortcut)) return `Key${shortcut}`
+  if (shortcut === 'Comma' || shortcut === 'Period' || shortcut === 'Space') return shortcut
 }
 
 onMounted(() => SetupPage.registerEl('settings_keybindings', el.value))

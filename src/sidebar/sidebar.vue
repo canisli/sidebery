@@ -154,6 +154,11 @@ import * as Utils from 'src/utils'
 import * as Popups from 'src/services/popups.fg'
 import * as Logs from 'src/services/logs'
 import { KEYBOARD_VIEWER_DEBUG_LOGGING } from 'src/services/keyboard-viewer-debug'
+import {
+  KEYBOARD_VIEWER_SHORTCUT_ACTIONS,
+  parseKeyboardViewerShortcuts,
+  type KeyboardViewerShortcutAction,
+} from 'src/services/keyboard-viewer-shortcuts'
 import * as Preview from 'src/services/tabs.fg.preview'
 import ConfirmPopup from './components/popup.confirm.vue'
 import CtxMenuPopup from './components/popup.context-menu.vue'
@@ -1063,22 +1068,10 @@ function handleKeyboardViewerCode(
     return 'handled'
   }
 
-  if (isKeyboardViewerBackspace(payload) && removeKeyboardViewerSelectedTab()) {
-    preventDefault?.()
-    return 'handled'
-  }
-
-  if (code === 'Escape' && keyboardViewerPanelId !== null) {
-    logKeyboardViewer('handling Escape close code', {
-      keyboardViewerPanelId,
-      activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
-    })
-    preventDefault?.()
-    cancelKeyboardViewer()
-    return 'cancel'
-  }
-
   if (isKeyboardViewerBlocked()) return false
+
+  const shortcutAction = getKeyboardViewerShortcutAction(payload.code)
+  if (shortcutAction) return handleKeyboardViewerShortcutAction(shortcutAction, preventDefault)
 
   if (handleKeyboardViewerMarkShortcut(code)) {
     preventDefault?.()
@@ -1089,34 +1082,69 @@ function handleKeyboardViewerCode(
     preventDefault?.()
     return 'handled'
   }
+  return false
+}
 
-  if (code === 'ArrowUp') {
+function getKeyboardViewerShortcutAction(
+  shortcut: string
+): KeyboardViewerShortcutAction | undefined {
+  const shortcuts = parseKeyboardViewerShortcuts(Settings.state.kbKeyboardViewerShortcuts)
+
+  return KEYBOARD_VIEWER_SHORTCUT_ACTIONS.find(action => {
+    return shortcuts[action].includes(shortcut)
+  })
+}
+
+function handleKeyboardViewerShortcutAction(
+  action: KeyboardViewerShortcutAction,
+  preventDefault?: () => void
+): KeyboardViewerKeyResponse {
+  if (action === 'remove_tab') {
+    if (!removeKeyboardViewerSelectedTab()) return false
+
+    preventDefault?.()
+    return 'handled'
+  }
+
+  if (action === 'cancel') {
+    if (keyboardViewerPanelId === null) return false
+
+    logKeyboardViewer('handling keyboard viewer cancel shortcut', {
+      keyboardViewerPanelId,
+      activeElement: getKeyboardViewerElementLogInfo(document.activeElement),
+    })
+    preventDefault?.()
+    cancelKeyboardViewer()
+    return 'cancel'
+  }
+
+  if (action === 'select_prev') {
     preventDefault?.()
     if (Selection.isNavItem()) moveKeyboardViewerPanel(-1)
     else moveKeyboardViewerTab(-1)
     return 'handled'
   }
 
-  if (code === 'ArrowDown') {
+  if (action === 'select_next') {
     preventDefault?.()
     if (Selection.isNavItem()) moveKeyboardViewerPanel(1)
     else moveKeyboardViewerTab(1)
     return 'handled'
   }
 
-  if (code === 'ArrowLeft') {
+  if (action === 'select_panel') {
     preventDefault?.()
     selectKeyboardViewerPanel()
     return 'handled'
   }
 
-  if (code === 'ArrowRight') {
+  if (action === 'select_panel_tabs') {
     preventDefault?.()
     enterKeyboardViewerTabsFromPanel()
     return 'handled'
   }
 
-  if (code === 'Enter') {
+  if (action === 'confirm') {
     if (Popups.reactive.confirm?.ok) return false
     if (Selection.isNavItem()) {
       preventDefault?.()
@@ -1124,6 +1152,7 @@ function handleKeyboardViewerCode(
       return 'handled'
     }
     if (keyboardViewerPanelId === null && !Selection.isTabs()) return false
+
     preventDefault?.()
     return commitKeyboardViewerFromUserInput() ? 'commit' : false
   }

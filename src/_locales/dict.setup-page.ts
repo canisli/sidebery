@@ -7367,6 +7367,33 @@ Przykłady: "*", "ctrl+$", "ctrl+alt+g"`,
     zh_TW: '- 依據垂直捲動切換設定來決定：\n  - 切換範圍（面板/全域）\n  - 切換時是否跳過/循環',
     ja: '- タブの切り替えに垂直スクロール設定を使用する',
   },
+  'settings.kb_keyboard_viewer': {
+    en: 'Canis and Gloria: Keyboard viewer',
+  },
+  'settings.kb_keyboard_viewer_note': {
+    en: 'Shortcuts used only while the keyboard viewer is active. Add multiple keys to an action by focusing it and pressing each key.',
+  },
+  'settings.kb_keyboard_viewer_select_prev': {
+    en: 'Canis and Gloria: Select previous item',
+  },
+  'settings.kb_keyboard_viewer_select_next': {
+    en: 'Canis and Gloria: Select next item',
+  },
+  'settings.kb_keyboard_viewer_select_panel': {
+    en: 'Canis and Gloria: Select panel list',
+  },
+  'settings.kb_keyboard_viewer_select_panel_tabs': {
+    en: 'Canis and Gloria: Select tabs in panel',
+  },
+  'settings.kb_keyboard_viewer_confirm': {
+    en: 'Canis and Gloria: Confirm selected item',
+  },
+  'settings.kb_keyboard_viewer_cancel': {
+    en: 'Canis and Gloria: Cancel keyboard viewer',
+  },
+  'settings.kb_keyboard_viewer_remove_tab': {
+    en: 'Canis and Gloria: Close selected tab',
+  },
   'settings.kb_mark_mode': {
     en: 'Mark mode',
   },
