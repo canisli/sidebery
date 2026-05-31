@@ -667,8 +667,41 @@ function getKeyboardViewerSearchPanelTabs(panel: Panel): Tab[] {
   return [...Tabs.pinned, ...panel.tabs]
 }
 
+function keyboardViewerTabTitleMatchesSearch(tab: Tab, query: string): boolean {
+  const title = (tab.customTitle ?? tab.title).toLowerCase()
+
+  return title.includes(query)
+}
+
+function keyboardViewerTabUrlMatchesSearch(tab: Tab, query: string): boolean {
+  const url = Utils.restoreUrl(tab.url)?.toLowerCase() ?? ''
+
+  return url.includes(query)
+}
+
 function keyboardViewerTabMatchesSearch(tab: Tab, query: string): boolean {
-  return (tab.customTitle ?? tab.title).toLowerCase().includes(query)
+  return (
+    keyboardViewerTabTitleMatchesSearch(tab, query) || keyboardViewerTabUrlMatchesSearch(tab, query)
+  )
+}
+
+function getKeyboardViewerUrlMatchedTabs(query: string): Tab[] {
+  const matchedTabs: Tab[] = []
+  const matchedIds = new Set<ID>()
+
+  for (const panel of Sidebar.panels) {
+    if (!Utils.isTabsPanel(panel)) continue
+
+    for (const tab of getKeyboardViewerSearchPanelTabs(panel)) {
+      if (matchedIds.has(tab.id)) continue
+      if (!keyboardViewerTabUrlMatchesSearch(tab, query)) continue
+
+      matchedIds.add(tab.id)
+      matchedTabs.push(tab)
+    }
+  }
+
+  return matchedTabs
 }
 
 function getKeyboardViewerSearchMatchPanel(query: string): Panel | undefined {
@@ -741,8 +774,14 @@ function resetKeyboardViewerSearchPanel(panel: Panel): void {
 
 function applyKeyboardViewerSearch(): void {
   const query = Sidebar.reactive.keyboardViewerSearchQuery.toLowerCase()
+  const urlMatchedTabs = query ? getKeyboardViewerUrlMatchedTabs(query) : []
+  const urlMatchPanel = urlMatchedTabs[0]
+    ? Sidebar.panelsById[urlMatchedTabs[0].panelId]
+    : undefined
   const panel =
-    (query ? getKeyboardViewerSearchMatchPanel(query) : undefined) ?? getKeyboardViewerSearchPanel()
+    (Utils.isTabsPanel(urlMatchPanel) ? urlMatchPanel : undefined) ??
+    (query ? getKeyboardViewerSearchMatchPanel(query) : undefined) ??
+    getKeyboardViewerSearchPanel()
   if (!Utils.isTabsPanel(panel)) return
 
   if (!query) {
@@ -757,10 +796,18 @@ function applyKeyboardViewerSearch(): void {
     }
   }
 
-  const filteredPinnedTabs = getKeyboardViewerSearchPanelTabs(panel).filter(tab => {
-    return tab.pinned && keyboardViewerTabMatchesSearch(tab, query)
-  })
-  const filteredTabs = panel.tabs.filter(tab => keyboardViewerTabMatchesSearch(tab, query))
+  let filteredPinnedTabs: Tab[]
+  let filteredTabs: Tab[]
+
+  if (urlMatchedTabs.length) {
+    filteredPinnedTabs = urlMatchedTabs.filter(tab => tab.pinned)
+    filteredTabs = urlMatchedTabs.filter(tab => !tab.pinned)
+  } else {
+    filteredPinnedTabs = getKeyboardViewerSearchPanelTabs(panel).filter(tab => {
+      return tab.pinned && keyboardViewerTabMatchesSearch(tab, query)
+    })
+    filteredTabs = panel.tabs.filter(tab => keyboardViewerTabMatchesSearch(tab, query))
+  }
 
   panel.filteredTabs = filteredTabs
   panel.reactive.filteredLen = filteredPinnedTabs.length + filteredTabs.length
