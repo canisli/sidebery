@@ -588,7 +588,7 @@ function onKeyNewTabAfter(): void {
 /**
  * Change selection
  */
-function onKeySelect(dir: number): void {
+function onKeySelect(dir: number, forceCyclic = false): void {
   if (!dir) return
 
   if (Windows.reactive.choosing) {
@@ -650,7 +650,7 @@ function onKeySelect(dir: number): void {
 
     if (!target) {
       // Cyclically
-      if (Settings.state.selectCyclic || !selIsSet) {
+      if (forceCyclic || Settings.state.selectCyclic || !selIsSet) {
         target = dir > 0 ? tabs[0] : tabs.findLast(t => !t.invisible)
       }
       if (!target) return
@@ -680,7 +680,7 @@ function onKeySelect(dir: number): void {
 
     if (!target) {
       // Cyclically
-      if (Settings.state.selectCyclic) {
+      if (forceCyclic || Settings.state.selectCyclic) {
         target = dir > 0 ? activePanel.bounds[0] : activePanel.bounds[boundsLen - 1]
       }
       if (!target) return
@@ -705,8 +705,8 @@ function onKeySelect(dir: number): void {
   }
 }
 
-export function selectNext(dir: 1 | -1): void {
-  onKeySelect(dir)
+export function selectNext(dir: 1 | -1, forceCyclic = false): void {
+  onKeySelect(dir, forceCyclic)
 }
 
 export function removeSelectedTab(): boolean {

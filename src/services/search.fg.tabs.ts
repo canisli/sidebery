@@ -63,12 +63,14 @@ export function onTabsSearch(activePanel: Panel): void {
 export function onTabsSearchNext(panel?: Panel): void {
   if (!panel) panel = Sidebar.panelsById[Sidebar.activePanelId]
   if (!Utils.isTabsPanel(panel) || !panel.filteredTabs) return
+  if (!panel.filteredTabs.length) return
 
   const selId = Selection.getFirst()
   let index = panel.filteredTabs.findIndex(t => t.id === selId)
 
   index += 1
-  if (index < 0 || index >= panel.filteredTabs.length) return
+  if (index >= panel.filteredTabs.length) index = 0
+  if (index < 0) return
 
   Selection.resetSelection()
   const tab = panel.filteredTabs[index]
@@ -81,6 +83,7 @@ export function onTabsSearchNext(panel?: Panel): void {
 export function onTabsSearchPrev(panel?: Panel): void {
   if (!panel) panel = Sidebar.panelsById[Sidebar.activePanelId]
   if (!Utils.isTabsPanel(panel) || !panel.filteredTabs) return
+  if (!panel.filteredTabs.length) return
 
   const selId = Selection.getFirst()
   let index = panel.filteredTabs.findIndex(t => t.id === selId)
@@ -90,7 +93,8 @@ export function onTabsSearchPrev(panel?: Panel): void {
   }
 
   index -= 1
-  if (index < 0 || index >= panel.filteredTabs.length) return
+  if (index < 0) index = panel.filteredTabs.length - 1
+  if (index >= panel.filteredTabs.length) return
 
   Selection.resetSelection()
   const tab = panel.filteredTabs[index]

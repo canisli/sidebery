@@ -894,7 +894,7 @@ function selectFirstPinnedOrVisibleTabInActivePanel(): boolean {
 function moveKeyboardViewerTab(dir: 1 | -1): void {
   startKeyboardViewer()
   if (!Selection.isTabs()) selectActiveTabInActivePanel()
-  Keybindings.selectNext(dir)
+  Keybindings.selectNext(dir, true)
 }
 
 function selectKeyboardViewerPanel(): void {
