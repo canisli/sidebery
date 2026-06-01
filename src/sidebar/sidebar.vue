@@ -336,6 +336,41 @@ function focusSidebarRoot(reason: string): void {
   })
 }
 
+function isNewSubtabShortcut(e: KeyboardEvent): boolean {
+  if (e.defaultPrevented) return false
+  if (e.code !== 'KeyT') return false
+  if (e.altKey || e.shiftKey) return false
+
+  if (e.metaKey && !e.ctrlKey) return true
+  return e.ctrlKey && !e.metaKey && Info.reactive.os !== 'mac'
+}
+
+function getNewSubtabParent(): Tab | undefined {
+  if (Selection.isTabs()) return Tabs.byId[Selection.getFirst()]
+
+  const activePanel = Sidebar.panelsById[Sidebar.activePanelId]
+  const activeTab = Tabs.byId[Tabs.activeId]
+  if (!Utils.isTabsPanel(activePanel)) return
+  if (!activeTab) return
+  if (!activeTab.pinned && activeTab.panelId !== activePanel.id) return
+
+  return activeTab
+}
+
+function handleNewSubtabShortcut(e: KeyboardEvent): boolean {
+  if (!isNewSubtabShortcut(e)) return false
+
+  const parentTab = getNewSubtabParent()
+  if (!parentTab) return false
+
+  e.preventDefault()
+  e.stopPropagation()
+  e.stopImmediatePropagation()
+
+  Tabs.createChildTab(parentTab.id)
+  return true
+}
+
 function onDocumentKeydown(e: KeyboardEvent): void {
   if (keyboardViewerActive.value && isKeyboardViewerToggleKeydown(e)) {
     logKeyboardViewer('document keydown matched toggle shortcut', {
@@ -346,6 +381,7 @@ function onDocumentKeydown(e: KeyboardEvent): void {
   }
 
   if (handleKeyboardViewerKeydown(e)) return
+  if (handleNewSubtabShortcut(e)) return
 
   // Close popups
   if (e.code === 'Escape') {
@@ -1013,6 +1049,8 @@ function commitKeyboardViewerFromUserInput(): boolean {
 function removeKeyboardViewerSelectedTab(): boolean {
   startKeyboardViewer()
   if (!Selection.isTabs()) selectActiveTabInActivePanel()
+  if (!Selection.isTabs()) return false
+  Sidebar.preserveKeyboardViewerSelection()
   return Keybindings.removeSelectedTab()
 }
 

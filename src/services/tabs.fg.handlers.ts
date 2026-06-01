@@ -1136,7 +1136,7 @@ function onTabRemoved(tabId: ID, info: browser.tabs.RemoveInfo, detached?: boole
 
   if (!Tabs.removingTabs.length) {
     Menu.close()
-    Selection.resetSelection()
+    if (!Sidebar.shouldPreserveKeyboardViewerSelection()) Selection.resetSelection()
   }
 
   // Try to get removed tab and its panel
