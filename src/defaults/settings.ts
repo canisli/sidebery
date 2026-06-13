@@ -294,7 +294,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   selectCyclic: false,
   loopPanelsIgnoreHidden: false,
   kbNewTabInPanelPos: 'general',
-  kbMarkPinnedTabs: '1 2 3 4 5 6 7 8 9 0',
+  kbMarkPinnedTabs: '1',
   kbKeyboardViewerShortcuts: DEFAULT_KEYBOARD_VIEWER_SHORTCUTS_CONF,
 }
 

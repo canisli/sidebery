@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { PanelType } from 'src/enums'
 import * as Sidebar from 'src/services/sidebar.fg'
 import * as Settings from 'src/services/settings'
+import * as Tabs from 'src/services/tabs.fg'
 import { addMNavBtn, addMPanel, resetMSidebar } from 'src/defaults/mocks.sidebar.fg'
+import { addMTab, resetMTabs, setDefaultMTabPanel } from 'src/defaults/mocks.tabs.fg'
 
 describe('Sidebar.switchPanel()', () => {
   beforeEach(() => {
@@ -14,7 +16,12 @@ describe('Sidebar.switchPanel()', () => {
 
   afterEach(() => {
     Settings.resetSettings()
+    Sidebar.reactive.keyboardViewerSearchActive = false
+    Sidebar.reactive.keyboardViewerSearchQuery = ''
     resetMSidebar()
+    resetMTabs()
+    Tabs.setPinned([])
+    Tabs.reactive.pinnedIds = []
   })
 
   test('to the next panel', () => {
@@ -189,5 +196,85 @@ describe('Sidebar.switchPanel()', () => {
 
     Sidebar.switchPanel(-1, true, false, false, true)
     expect(Sidebar.activePanelId).toBe('b')
+  })
+
+  test('removing visible tab keeps filtered tab results in sync for regular search', () => {
+    const panel = addMPanel({ type: PanelType.tabs, id: 'a' })
+    if (!panel || panel.type !== PanelType.tabs) throw 'no tabs panel'
+    setDefaultMTabPanel(panel.id)
+    const first = addMTab({ id: 1, title: 'First match' })
+    const second = addMTab({ id: 2, title: 'Second match' })
+
+    panel.tabs = [first, second]
+    panel.filteredTabs = [first, second]
+    panel.reactive.filteredLen = 2
+    panel.reactive.visibleTabIds = [first.id, second.id]
+
+    Sidebar.removeFromVisibleTabs(panel.id, first.id)
+
+    expect(panel.filteredTabs).toEqual([second])
+    expect(panel.reactive.filteredLen).toBe(1)
+    expect(panel.reactive.visibleTabIds).toEqual([second.id])
+  })
+
+  test('removing visible tab keeps keyboard viewer pinned results in filtered count', () => {
+    const panel = addMPanel({ type: PanelType.tabs, id: 'a' })
+    if (!panel || panel.type !== PanelType.tabs) throw 'no tabs panel'
+    setDefaultMTabPanel(panel.id)
+    const pinned = addMTab({ id: 1, pinned: true, title: 'Pinned match' })
+    const first = addMTab({ id: 2, title: 'First match' })
+    const second = addMTab({ id: 3, title: 'Second match' })
+
+    Sidebar.reactive.keyboardViewerSearchActive = true
+    panel.pinnedTabs = [pinned]
+    panel.tabs = [first, second]
+    panel.filteredTabs = [first, second]
+    panel.reactive.pinnedTabIds = [pinned.id]
+    panel.reactive.filteredLen = 3
+    panel.reactive.visibleTabIds = [first.id, second.id]
+
+    Sidebar.removeFromVisibleTabs(panel.id, first.id)
+
+    expect(panel.reactive.pinnedTabIds).toEqual([pinned.id])
+    expect(panel.filteredTabs).toEqual([second])
+    expect(panel.reactive.filteredLen).toBe(2)
+    expect(panel.reactive.visibleTabIds).toEqual([second.id])
+  })
+
+  test('recalculating tabs panels preserves filtered panel pinned results in keyboard viewer search', () => {
+    const panel = addMPanel({ type: PanelType.tabs, id: 'a' })
+    if (!panel || panel.type !== PanelType.tabs) throw 'no tabs panel'
+    setDefaultMTabPanel(panel.id)
+    const pinnedMatch = addMTab({ id: 1, pinned: true, title: 'Pinned match' })
+    const pinnedOther = addMTab({ id: 2, pinned: true, title: 'Pinned other' })
+    const visible = addMTab({ id: 3, title: 'Visible match' })
+
+    Sidebar.reactive.keyboardViewerSearchActive = true
+    panel.filteredTabs = [visible]
+    panel.reactive.pinnedTabIds = [pinnedMatch.id]
+
+    Sidebar.recalcTabsPanels()
+
+    expect(panel.pinnedTabs).toEqual([pinnedMatch, pinnedOther])
+    expect(panel.reactive.pinnedTabIds).toEqual([pinnedMatch.id])
+  })
+
+  test('recalculating tabs panels preserves filtered global pinned results in keyboard viewer search', () => {
+    Settings.state.pinnedTabsPosition = 'top'
+    const panel = addMPanel({ type: PanelType.tabs, id: 'a' })
+    if (!panel || panel.type !== PanelType.tabs) throw 'no tabs panel'
+    setDefaultMTabPanel(panel.id)
+    const pinnedMatch = addMTab({ id: 1, pinned: true, title: 'Pinned match' })
+    const pinnedOther = addMTab({ id: 2, pinned: true, title: 'Pinned other' })
+    const visible = addMTab({ id: 3, title: 'Visible match' })
+
+    Sidebar.reactive.keyboardViewerSearchActive = true
+    panel.filteredTabs = [visible]
+    Tabs.reactive.pinnedIds = [pinnedMatch.id]
+
+    Sidebar.recalcTabsPanels()
+
+    expect(Tabs.pinned).toEqual([pinnedMatch, pinnedOther])
+    expect(Tabs.reactive.pinnedIds).toEqual([pinnedMatch.id])
   })
 })

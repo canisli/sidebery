@@ -426,7 +426,13 @@ export function recalcTabsPanels(reset?: boolean): void {
     const pinnedTabsOfPanel = pinnedTabsByPanel[panelId]
     if (pinnedTabsOfPanel) {
       panel.pinnedTabs = pinnedTabsOfPanel
-      panel.reactive.pinnedTabIds = pinnedTabIdsOfPanel
+      if (reactive.keyboardViewerSearchActive && panel.filteredTabs) {
+        panel.reactive.pinnedTabIds = panel.reactive.pinnedTabIds.filter(id => {
+          return pinnedTabIdsOfPanel.includes(id)
+        })
+      } else {
+        panel.reactive.pinnedTabIds = pinnedTabIdsOfPanel
+      }
     } else if (panel.pinnedTabs.length > 0) {
       panel.pinnedTabs = []
       panel.reactive.pinnedTabIds = []
@@ -482,7 +488,11 @@ export function recalcTabsPanels(reset?: boolean): void {
 
   if (!samePinned || pinnedTabs.length !== Tabs.pinned.length) {
     Tabs.setPinned(pinnedTabs)
-    Tabs.reactive.pinnedIds = pinnedTabIds
+    if (reactive.keyboardViewerSearchActive) {
+      Tabs.reactive.pinnedIds = Tabs.reactive.pinnedIds.filter(id => pinnedTabIds.includes(id))
+    } else {
+      Tabs.reactive.pinnedIds = pinnedTabIds
+    }
   }
 }
 
@@ -538,6 +548,23 @@ export function addToVisibleTabs(panelId: ID, tab: T.Tab) {
 export function removeFromVisibleTabs(panelId: ID, tabId: ID) {
   const panel = panelsById[panelId]
   if (!Utils.isTabsPanel(panel)) return
+
+  if (panel.filteredTabs) {
+    const filteredIndex = panel.filteredTabs.findIndex(t => t.id === tabId)
+    if (filteredIndex !== -1) panel.filteredTabs.splice(filteredIndex, 1)
+
+    if (reactive.keyboardViewerSearchActive) {
+      Utils.rmFromArray(panel.reactive.pinnedTabIds, tabId)
+      Utils.rmFromArray(Tabs.reactive.pinnedIds, tabId)
+      const filteredPinnedLen =
+        Settings.state.pinnedTabsPosition === 'panel'
+          ? panel.reactive.pinnedTabIds.length
+          : Tabs.reactive.pinnedIds.length
+      panel.reactive.filteredLen = filteredPinnedLen + panel.filteredTabs.length
+    } else {
+      panel.reactive.filteredLen = panel.filteredTabs.length
+    }
+  }
 
   const visibleTabIds = panel.reactive.visibleTabIds
   const index = visibleTabIds.indexOf(tabId)

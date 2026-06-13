@@ -218,6 +218,18 @@ function onMouseDownClose(e: MouseEvent): void {
   if (!Settings.state.tabCloseOnMouseUp) closeBtnAction(e)
 }
 function onMouseUpClose(e: MouseEvent): void {
+  const searchResultMode = Search.active || Sidebar.reactive.keyboardViewerSearchActive
+  if (searchResultMode && e.button === 0) {
+    Mouse.resetTarget()
+    Mouse.stopLongClick()
+    Mouse.stopMultiSelection()
+    Selection.resetSelection()
+    Tabs.removeTabs([tab.id])
+    e.stopPropagation()
+    e.preventDefault()
+    return
+  }
+
   if (!Mouse.isTarget('tab.close', tab.id)) {
     e.stopPropagation()
     e.preventDefault()

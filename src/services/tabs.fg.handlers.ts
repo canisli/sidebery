@@ -1389,8 +1389,9 @@ function onTabRemoved(tabId: ID, info: browser.tabs.RemoveInfo, detached?: boole
       else Sidebar.switchToNeighbourPanel()
     }
 
-    // Update filtered results
-    if (Search.active) Search.search()
+    // Update filtered results after external removals. Sidebery-initiated
+    // removals already update the current result set incrementally.
+    if (Search.active && removedExternally) Search.search()
   }
 
   // Reload related group for pinned tab

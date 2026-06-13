@@ -927,8 +927,57 @@ function selectFirstPinnedOrVisibleTabInActivePanel(): boolean {
   return true
 }
 
+function moveKeyboardViewerSearchResult(dir: 1 | -1): boolean {
+  if (!Sidebar.reactive.keyboardViewerSearchActive) return false
+
+  const activePanel = Sidebar.panelsById[Sidebar.activePanelId]
+  if (!Utils.isTabsPanel(activePanel)) return false
+  if (!activePanel.filteredTabs) return false
+
+  const pinnedIds =
+    Settings.state.pinnedTabsPosition === 'panel'
+      ? activePanel.reactive.pinnedTabIds
+      : Tabs.reactive.pinnedIds
+  const tabs: Tab[] = []
+  const tabIds = new Set<ID>()
+
+  for (const id of pinnedIds) {
+    const tab = Tabs.byId[id]
+    if (!tab || tabIds.has(tab.id)) continue
+
+    tabs.push(tab)
+    tabIds.add(tab.id)
+  }
+
+  for (const tab of activePanel.filteredTabs) {
+    if (tabIds.has(tab.id)) continue
+
+    tabs.push(tab)
+    tabIds.add(tab.id)
+  }
+
+  if (!tabs.length) return true
+
+  const selId = Selection.getFirst()
+  let index = tabs.findIndex(tab => tab.id === selId)
+  if (index === -1) index = dir > 0 ? -1 : tabs.length
+
+  index += dir
+  if (index < 0) index = tabs.length - 1
+  else if (index >= tabs.length) index = 0
+
+  const tab = tabs[index]
+  if (!tab) return true
+
+  Selection.resetSelection()
+  Selection.selectTab(tab.id)
+  Tabs.scrollToTab(tab.id, true)
+  return true
+}
+
 function moveKeyboardViewerTab(dir: 1 | -1): void {
   startKeyboardViewer()
+  if (moveKeyboardViewerSearchResult(dir)) return
   if (!Selection.isTabs()) selectActiveTabInActivePanel()
   Keybindings.selectNext(dir, true)
 }
